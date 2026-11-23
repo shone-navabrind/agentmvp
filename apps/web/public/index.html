@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Harness Cloud</title>
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body>
+    <div id="app" class="shell">
+      <!-- LEFT: workspace -> projects -> sessions. Sessions are durable objects. -->
+      <nav class="rail" id="rail">
+        <div class="rail-head">
+          <div class="logo">HC</div>
+          <div>
+            <div class="rail-title">Harness Cloud</div>
+            <button class="ws-switch" id="ws-switch">Navabrind IT ▾</button>
+          </div>
+        </div>
+
+        <div class="rail-section">Projects</div>
+        <ul class="project-list" id="project-list"></ul>
+
+        <div class="rail-section">
+          Sessions <span class="capacity" id="capacity"></span>
+        </div>
+        <ul class="session-list" id="session-list"></ul>
+
+        <div class="rail-foot">
+          <div class="who">
+            <div class="avatar">S</div>
+            <div>
+              <div class="who-name">shone</div>
+              <div class="who-role">admin · Navabrind IT</div>
+            </div>
+          </div>
+        </div>
+      </nav>
+
+      <!-- CENTER: one surface at a time, per project -->
+      <main class="main">
+        <header class="tabs" id="tabs"></header>
+        <section class="surface" id="surface"></section>
+      </main>
+
+      <!-- RIGHT: project status, not model telemetry -->
+      <aside class="status" id="status"></aside>
+    </div>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

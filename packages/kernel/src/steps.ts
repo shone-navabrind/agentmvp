@@ -234,9 +234,12 @@ export class StepRuntime {
         );
         const p = prior.rows[0];
         if (p?.state === "completed") return p.output as T;
-        // For a non-idempotent step, ANY prior attempt -- interrupted or failed -- leaves it
-        // unknown whether the outside world already acted. Refuse rather than double-charge.
-        if (p && p.state !== "completed" && !idempotent) throw new AmbiguousStep(runId, key);
+        // For a non-idempotent step, a prior interrupted or failed attempt leaves it unknown
+        // whether the outside world already acted. Refuse rather than double-charge.
+        // "suspended" is exempt: nothing ran, the step is waiting on a person.
+        if (p && p.state !== "completed" && p.state !== "suspended" && !idempotent) {
+          throw new AmbiguousStep(runId, key);
+        }
 
         // Committed before the side effect runs, so an interrupted non-idempotent step
         // is detectable on resume rather than silently repeated.
@@ -251,10 +254,14 @@ export class StepRuntime {
           );
           return out;
         } catch (err) {
+          // Waiting on a person is not a failure: record it as such so the run timeline
+          // shows a gate, not an error.
+          const state =
+            err instanceof SuspendRun ? "suspended" : idempotent ? "failed" : "ambiguous";
           await self.#db.query(
             `update flow_steps set state = $4, error = $3, at = now()
              where run_id = $1 and step_key = $2`,
-            [runId, key, JSON.stringify(serializeError(err)), idempotent ? "failed" : "ambiguous"],
+            [runId, key, JSON.stringify(serializeError(err)), state],
           );
           throw err;
         }

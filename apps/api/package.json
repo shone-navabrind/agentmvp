@@ -1,0 +1,26 @@
+{
+  "name": "@harness/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --experimental-strip-types src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --experimental-strip-types src/*.test.ts"
+  },
+  "dependencies": {
+    "@harness/kernel": "*",
+    "@harness/flow": "*",
+    "@harness/board": "*",
+    "@harness/compute": "*",
+    "@harness/sandbox": "*",
+    "@harness/triggers": "*",
+    "@harness/billing": "*",
+    "@harness/plugins": "*",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
+}

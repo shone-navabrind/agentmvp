@@ -2,5 +2,14 @@
   "name": "agentmvp",
   "private": true,
   "type": "module",
-  "workspaces": ["packages/*"]
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "start": "npm start -w @harness/api",
+    "shots": "node apps/web/shots.mjs docs/screenshots"
+  }
 }

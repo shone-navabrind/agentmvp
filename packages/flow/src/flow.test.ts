@@ -382,6 +382,28 @@ describe("human in the loop", () => {
     await close();
   });
 
+  test("a suspended step is recorded as suspended, not failed", async () => {
+    const g: Graph = {
+      name: "gate-only",
+      entry: "gate",
+      nodes: [{ id: "gate", type: "core.approval", input: { question: "ship it?" } }],
+      edges: [],
+    };
+    const { k, close } = await kernelWith(g, standardNodes());
+    const runId = await k.steps.start("graph:gate-only", {}, SCOPE);
+    await k.steps.execute(runId);
+
+    const steps = await k.steps.steps(runId);
+    const gate = steps.find((s) => s.step_key === "approval:gate")!;
+    assert.equal(
+      gate.state,
+      "suspended",
+      "waiting on a person must not be recorded as a failure in the run timeline",
+    );
+    assert.ok(!steps.some((s) => s.state === "failed"));
+    await close();
+  });
+
   test("resuming a run that is not paused is refused", async () => {
     const g: Graph = {
       name: "plain",
