@@ -2,9 +2,20 @@ const $ = (id) => document.getElementById(id);
 const get = (p) => fetch(p).then((r) => r.json());
 const esc = (s) =>
   String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-const usd = (micros) => `$${(Number(micros) / 1e6).toFixed(2)}`;
+const money = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" });
+const usd = (micros) => money.format(Number(micros) / 1e6);
 
-const state = { tab: "chat", session: "s-auth", data: {} };
+const params = new URLSearchParams(location.search);
+const state = {
+  tab: params.get("tab") ?? "chat",
+  session: params.get("session") ?? "s-auth",
+  data: {},
+};
+
+function syncUrl() {
+  const q = new URLSearchParams({ tab: state.tab, session: state.session });
+  history.replaceState(null, "", `${location.pathname}?${q}`);
+}
 
 // Capability-driven rendering: one UI, tabs appear only if the viewer may use them.
 // The viewer here is an admin, so the terminal is unlocked.
@@ -50,12 +61,15 @@ function renderRail() {
     { id: "p3", name: "data-pipeline", state: "stopped", sub: "stopped" },
   ]
     .map(
-      (p) => `<li class="${p.id === "p1" ? "on" : ""}">
-        <span class="dot ${p.state}"></span>
-        <span class="item-main">
-          <span class="item-title">${esc(p.name)}</span>
-          <div class="item-sub">${esc(p.sub)}</div>
-        </span>
+      (p) => `<li>
+        <button class="nav-item" aria-current="${p.id === "p1"}">
+          <span class="dot ${p.state}" aria-hidden="true"></span>
+          <span class="item-main">
+            <span class="item-title">${esc(p.name)}</span>
+            <span class="item-sub">${esc(p.sub)}</span>
+          </span>
+          <span class="sr-only">, ${esc(p.state)}</span>
+        </button>
       </li>`,
     )
     .join("");
@@ -63,37 +77,51 @@ function renderRail() {
   $("capacity").textContent = `${project.capacity.activeSessions}/${project.capacity.maxSessions}`;
   $("session-list").innerHTML = sessions
     .map(
-      (s) => `<li class="${s.id === state.session ? "on" : ""}" data-session="${s.id}">
-        <span class="dot ${s.state}"></span>
-        <span class="item-main">
-          <span class="item-title">${esc(s.title)}</span>
-          <div class="item-sub">${esc(s.branch)} · :${s.portRange.from}</div>
-        </span>
+      (s) => `<li>
+        <button class="nav-item" data-session="${esc(s.id)}"
+                aria-current="${s.id === state.session}">
+          <span class="dot ${s.state}" aria-hidden="true"></span>
+          <span class="item-main">
+            <span class="item-title">${esc(s.title)}</span>
+            <span class="item-sub"><span translate="no">${esc(s.branch)}</span> · :${s.portRange.from}</span>
+          </span>
+          <span class="sr-only">, ${esc(s.state)}</span>
+        </button>
       </li>`,
     )
     .join("");
 
-  for (const li of $("session-list").querySelectorAll("li")) {
-    li.onclick = async () => {
-      state.session = li.dataset.session;
+  // Real <button>s, so Enter/Space, focus order and the accessible name all come
+  // from the platform rather than a hand-rolled keydown handler on an <li>.
+  for (const btn of $("session-list").querySelectorAll("[data-session]")) {
+    btn.addEventListener("click", async () => {
+      state.session = btn.dataset.session;
       state.tab = "chat";
+      syncUrl();
       state.data.chat = await get(`/api/v1/sessions/${state.session}`);
       render();
-    };
+    });
   }
 }
 
 function renderTabs() {
   $("tabs").innerHTML = TABS.map((t) => {
     const allowed = VIEWER_CAPS.has(t.cap);
-    return `<button class="tab ${state.tab === t.id ? "on" : ""} ${allowed ? "" : "locked"}"
-      data-tab="${t.id}" ${allowed ? "" : "disabled"}>${t.label}</button>`;
+    const on = state.tab === t.id;
+    const lock = allowed
+      ? ""
+      : `<span class="tab-lock" aria-hidden="true">\u{1F512}</span>` +
+        `<span class="sr-only">, requires the ${t.cap} capability</span>`;
+    return `<button class="tab ${on ? "on" : ""} ${allowed ? "" : "locked"}"
+      role="tab" aria-selected="${on}" aria-controls="surface"
+      data-tab="${t.id}" ${allowed ? "" : 'disabled aria-disabled="true"'}>${t.label}${lock}</button>`;
   }).join("");
   for (const b of $("tabs").querySelectorAll(".tab")) {
-    b.onclick = () => {
+    b.addEventListener("click", () => {
       state.tab = b.dataset.tab;
+      syncUrl();
       render();
-    };
+    });
   }
 }
 
@@ -137,7 +165,7 @@ function viewChat(d) {
   return `<h2 class="sec">${esc(title)}</h2>${body}
     <div class="composer">
       <span>Reply to pi…</span>
-      <span class="composer-meta">${esc(state.session)} · ${esc(d.project.model)}</span>
+      <span class="composer-meta" translate="no">${esc(state.session)} · ${esc(d.project.model)}</span>
     </div>
     <div class="note">Tool activity is shown as friendly summaries. Raw tool calls, VM names
       and IPs are never rendered for members — this view is capability-filtered, not a
@@ -150,8 +178,8 @@ function viewBoard(d) {
     .map((state_) => {
       const cards = d.board.columns[state_] ?? [];
       return `<div>
-        <div class="col-head"><span>${state_}</span><span>${cards.length}</span></div>
-        ${cards.map(card).join("")}
+        <h3 class="col-head"><span>${state_}</span><span>${cards.length}</span></h3>
+        ${cards.map(card).join("") || `<p class="empty-col">Nothing in ${state_}</p>`}
       </div>`;
     })
     .join("");
@@ -334,7 +362,7 @@ function viewBilling(d) {
       <td>${esc(e.kind)}</td>
       <td class="mono">${e.project_id ?? "—"}</td>
       <td class="mono">${usd(e.amount_micros)}</td>
-      <td>${e.billable ? "" : '<span class="chip">BYOK · not charged</span>'}</td>
+      <td>${e.billable ? '<span class="chip">charged</span>' : '<span class="chip">BYOK · not charged</span>'}</td>
       <td class="mono" style="color:var(--fg-faint)">${esc(e.idem_key)}</td>
     </tr>`,
     )
@@ -355,7 +383,7 @@ function viewBilling(d) {
     </div>
     ${alerts}
     <h2 class="sec">Ledger</h2>
-    <table><thead><tr><th>Kind</th><th>Project</th><th>Amount</th><th></th><th>Idempotency key</th></tr></thead>
+    <table><thead><tr><th>Kind</th><th>Project</th><th>Amount</th><th>Billing</th><th>Idempotency key</th></tr></thead>
     <tbody>${entries}</tbody></table>
     <div class="note">Append-only, in USD micro-units, with idempotency keys: a replayed
       spend-sync cannot double-charge. The gateway's own cap is set to the remaining balance,
@@ -383,7 +411,7 @@ function renderStatus() {
     .map(
       (e) => `<div class="evt">
         <span class="evt-seq">${esc(e.seq)}</span>
-        <span class="evt-type">${esc(e.type)}</span>
+        <span class="evt-type" translate="no">${esc(e.type)}</span>
       </div>`,
     )
     .join("");
@@ -437,4 +465,5 @@ function renderStatus() {
     </div>`;
 }
 
+syncUrl();
 load();

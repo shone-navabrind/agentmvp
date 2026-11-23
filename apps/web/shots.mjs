@@ -33,7 +33,7 @@ page.on("console", (m) => {
 page.on("pageerror", (e) => console.error("  page exception:", e.message));
 
 await page.goto(BASE, { waitUntil: "networkidle" });
-await page.waitForSelector("#session-list li", { timeout: 10_000 });
+await page.waitForSelector("#session-list [data-session]", { timeout: 10_000 });
 
 for (const [tab, name] of TABS) {
   await page.click(`.tab[data-tab="${tab}"]`);
@@ -43,7 +43,7 @@ for (const [tab, name] of TABS) {
 }
 
 // A second session selected, to show the rail switching and per-session status.
-await page.click('#session-list li[data-session="s-perf"]');
+await page.click('#session-list [data-session="s-perf"]');
 await page.waitForTimeout(300);
 await page.screenshot({ path: `${OUT}/09-second-session.png` });
 console.log("  09-second-session.png");

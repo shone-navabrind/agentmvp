@@ -2,33 +2,42 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0f1012" />
+    <meta name="color-scheme" content="dark" />
     <title>Harness Cloud</title>
     <link rel="stylesheet" href="app.css" />
   </head>
   <body>
+    <header class="page-head">
+      <a class="skip" href="#surface">Skip to content</a>
+      <h1 class="sr-only">Harness Cloud — project acme-platform</h1>
+    </header>
+
     <div id="app" class="shell">
       <!-- LEFT: workspace -> projects -> sessions. Sessions are durable objects. -->
-      <nav class="rail" id="rail">
+      <nav class="rail" id="rail" aria-label="Workspace">
         <div class="rail-head">
-          <div class="logo">HC</div>
+          <div class="logo" aria-hidden="true">HC</div>
           <div>
-            <div class="rail-title">Harness Cloud</div>
-            <button class="ws-switch" id="ws-switch">Navabrind IT ▾</button>
+            <div class="rail-title" translate="no">Harness Cloud</div>
+            <button class="ws-switch" id="ws-switch" aria-haspopup="listbox" aria-expanded="false">
+              Navabrind IT <span aria-hidden="true">▾</span>
+            </button>
           </div>
         </div>
 
-        <div class="rail-section">Projects</div>
-        <ul class="project-list" id="project-list"></ul>
+        <h2 class="rail-section" id="projects-head">Projects</h2>
+        <ul class="project-list" id="project-list" aria-labelledby="projects-head"></ul>
 
-        <div class="rail-section">
+        <h2 class="rail-section" id="sessions-head">
           Sessions <span class="capacity" id="capacity"></span>
-        </div>
-        <ul class="session-list" id="session-list"></ul>
+        </h2>
+        <ul class="session-list" id="session-list" aria-labelledby="sessions-head"></ul>
 
         <div class="rail-foot">
           <div class="who">
-            <div class="avatar">S</div>
+            <div class="avatar" aria-hidden="true">S</div>
             <div>
               <div class="who-name">shone</div>
               <div class="who-role">admin · Navabrind IT</div>
@@ -39,12 +48,12 @@
 
       <!-- CENTER: one surface at a time, per project -->
       <main class="main">
-        <header class="tabs" id="tabs"></header>
-        <section class="surface" id="surface"></section>
+        <div class="tabs" id="tabs" role="tablist" aria-label="Project views"></div>
+        <section class="surface" id="surface" tabindex="0" role="tabpanel" aria-live="polite"></section>
       </main>
 
       <!-- RIGHT: project status, not model telemetry -->
-      <aside class="status" id="status"></aside>
+      <aside class="status" id="status" tabindex="0" aria-label="Project status"></aside>
     </div>
     <script type="module" src="app.js"></script>
   </body>
