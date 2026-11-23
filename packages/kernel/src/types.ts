@@ -53,11 +53,23 @@ export interface Db extends Queryable {
 export class KernelError extends Error {
   code: string;
   details: Record<string, unknown>;
-  constructor(code: string, message: string, details: Record<string, unknown> = {}) {
+  /**
+   * false => retrying cannot change the outcome (a schema violation, a tripped guard,
+   * an exhausted budget). The step runtime fails such a run immediately instead of
+   * burning its whole retry allowance on a deterministic error.
+   */
+  retryable: boolean;
+  constructor(
+    code: string,
+    message: string,
+    details: Record<string, unknown> = {},
+    retryable = true,
+  ) {
     super(message);
     this.name = "KernelError";
     this.code = code;
     this.details = details;
+    this.retryable = retryable;
   }
 }
 
@@ -92,12 +104,27 @@ export class DuplicateEvent extends KernelError {
   }
 }
 
+/**
+ * Thrown by a step that needs a human. The runtime parks the run as `paused` rather than
+ * failing it; resume() writes the answer as that step's result and the flow carries on.
+ */
+export class SuspendRun extends KernelError {
+  readonly stepKey: string;
+  readonly question: { text: string; options?: string[]; meta?: unknown };
+  constructor(stepKey: string, question: { text: string; options?: string[]; meta?: unknown }) {
+    super("SUSPEND_RUN", `Run suspended at "${stepKey}": ${question.text}`, { stepKey, question });
+    this.stepKey = stepKey;
+    this.question = question;
+  }
+}
+
 export class AmbiguousStep extends KernelError {
   constructor(runId: string, stepKey: string) {
     super(
       "AMBIGUOUS_STEP",
       `Non-idempotent step "${stepKey}" was interrupted after starting; cannot safely retry`,
       { runId, stepKey },
+      false,
     );
   }
 }

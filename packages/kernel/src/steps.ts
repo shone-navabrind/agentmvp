@@ -1,5 +1,5 @@
 import type { Db, Event, Scope } from "./types.ts";
-import { AmbiguousStep, KernelError } from "./types.ts";
+import { AmbiguousStep, KernelError, SuspendRun } from "./types.ts";
 
 /** Preserve code and details when an error is persisted; operators triage from these. */
 function serializeError(err: unknown): Record<string, unknown> {
@@ -36,7 +36,7 @@ export type FlowDefinition<I = unknown, O = unknown> = {
 export type RunRecord = {
   id: string;
   kind: string;
-  state: "queued" | "running" | "completed" | "failed";
+  state: "queued" | "running" | "completed" | "failed" | "paused";
   output: unknown;
   error: unknown;
   attempt: number;
@@ -44,10 +44,12 @@ export type RunRecord = {
 
 export class BudgetExceeded extends KernelError {
   constructor(spent: number, limit: number) {
-    super("BUDGET_EXCEEDED", `Flow spent $${spent.toFixed(4)}, limit $${limit.toFixed(4)}`, {
-      spent,
-      limit,
-    });
+    super(
+      "BUDGET_EXCEEDED",
+      `Flow spent $${spent.toFixed(4)}, limit $${limit.toFixed(4)}`,
+      { spent, limit },
+      false,
+    );
   }
 }
 
@@ -99,6 +101,41 @@ export class StepRuntime {
       [runId],
     );
     return r.rows;
+  }
+
+  /**
+   * Answer a suspended step. The answer is written as that step's completed result, so
+   * memoisation does the rest: the node returns it on the next execute() without re-running.
+   */
+  async resume(runId: string, stepKey: string, answer: unknown): Promise<RunRecord> {
+    const r = await this.#db.query<{ state: string }>(
+      `select state from flow_runs where id = $1`,
+      [runId],
+    );
+    if (!r.rows[0]) throw new Error(`No such run "${runId}"`);
+    if (r.rows[0].state !== "paused") {
+      throw new KernelError("NOT_PAUSED", `Run "${runId}" is ${r.rows[0].state}, not paused`, {
+        runId,
+        state: r.rows[0].state,
+      });
+    }
+    await this.#db.query(
+      `insert into flow_steps (run_id, step_key, state, idempotent, output)
+       values ($1,$2,'completed',true,$3)
+       on conflict (run_id, step_key)
+         do update set state='completed', output=$3, error=null, at=now()`,
+      [runId, stepKey, JSON.stringify(answer ?? null)],
+    );
+    await this.#db.query(`update flow_runs set state='queued', error=null where id=$1`, [runId]);
+    return (await this.get(runId))!;
+  }
+
+  /** Runs paused on a human decision, for the approval inbox. */
+  async awaitingDecision(): Promise<Array<{ id: string; kind: string; question: unknown }>> {
+    const r = await this.#db.query<{ id: string; kind: string; error: { details?: { question?: unknown } } }>(
+      `select id, kind, error from flow_runs where state = 'paused' order by id`,
+    );
+    return r.rows.map((x) => ({ id: x.id, kind: x.kind, question: x.error?.details?.question }));
   }
 
   /** Runs whose worker died: still marked running, but the lease has expired. */
@@ -233,8 +270,18 @@ export class StepRuntime {
         [runId, JSON.stringify(output ?? null)],
       );
     } catch (err) {
+      if (err instanceof SuspendRun) {
+        // Not a failure: the flow is waiting on a person. Park it and surface the question.
+        await this.#db.query(
+          `update flow_runs set state='paused', error=$2, lease_until=null where id=$1`,
+          [runId, JSON.stringify(serializeError(err))],
+        );
+        return (await this.get(runId))!;
+      }
       const maxAttempts = def.maxAttempts ?? 3;
-      const terminal = attempt >= maxAttempts || err instanceof AmbiguousStep;
+      // A deterministic error will fail identically on every attempt; do not burn retries.
+      const deterministic = err instanceof KernelError && !err.retryable;
+      const terminal = attempt >= maxAttempts || deterministic;
       await this.#db.query(
         `update flow_runs set state=$2, error=$3, lease_until=null,
            ended_at = case when $2 = 'failed' then now() else null end
