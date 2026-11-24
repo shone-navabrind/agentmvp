@@ -1,5 +1,5 @@
 import type { Db, Event, Scope } from "./types.ts";
-import { AmbiguousStep, KernelError, SuspendRun } from "./types.ts";
+import { AmbiguousStep, KernelError, StepHeldElsewhere, SuspendRun } from "./types.ts";
 
 /** Preserve code and details when an error is persisted; operators triage from these. */
 function serializeError(err: unknown): Record<string, unknown> {
@@ -10,6 +10,7 @@ function serializeError(err: unknown): Record<string, unknown> {
 }
 import type { EventLog } from "./log.ts";
 import { ulid } from "./ulid.ts";
+import { createHash } from "node:crypto";
 
 export type StepOptions = {
   /** false => the step may not be blindly retried after an interrupted attempt. */
@@ -19,6 +20,12 @@ export type StepOptions = {
 export type StepCtx = {
   runId: string;
   attempt: number;
+  /**
+   * False when this is the last attempt the runtime will make. A graph uses it to
+   * decide whether to unwind: releasing resources after a retryable failure would
+   * destroy what the next attempt was going to reuse.
+   */
+  willRetry(err: unknown): boolean;
   scope: Scope;
   /** Memoised side effect. Completed steps are never re-executed on resume. */
   step<T>(key: string, fn: () => Promise<T>, opts?: StepOptions): Promise<T>;
@@ -78,13 +85,63 @@ export class StepRuntime {
     return this;
   }
 
+  /**
+   * Record the definition a run will be pinned to.
+   *
+   * `definition` is whatever describes the flow durably -- for a compiled graph, the
+   * graph JSON. A run started after this stores the version id, so a later edit
+   * creates a new version and leaves in-flight runs on the one they began with.
+   */
+  async publish(kind: string, definition: unknown): Promise<{ id: string; version: number; digest: string }> {
+    const digest = createHash("sha256").update(JSON.stringify(definition)).digest("hex");
+
+    const existing = await this.#db.query<{ id: string; version: number }>(
+      `select id, version from flow_versions where kind = $1 and digest = $2`,
+      [kind, digest],
+    );
+    if (existing.rows[0]) return { ...existing.rows[0], digest };
+
+    const next = await this.#db.query<{ v: number }>(
+      `select coalesce(max(version), 0) + 1 as v from flow_versions where kind = $1`,
+      [kind],
+    );
+    const version = next.rows[0].v;
+    const id = ulid();
+    await this.#db.query(
+      `insert into flow_versions (id, kind, version, graph, digest) values ($1,$2,$3,$4,$5)`,
+      [id, kind, version, JSON.stringify(definition), digest],
+    );
+    return { id, version, digest };
+  }
+
+  /** The definition a run is pinned to, for resuming or for rendering its timeline. */
+  async pinnedDefinition(runId: string): Promise<{ version: number; graph: unknown } | null> {
+    const r = await this.#db.query<{ version: number; graph: unknown }>(
+      `select v.version, v.graph
+         from flow_runs r join flow_versions v on v.id = r.flow_version_id
+        where r.id = $1`,
+      [runId],
+    );
+    return r.rows[0] ?? null;
+  }
+
   async start<I>(kind: string, input: I, scope: Scope): Promise<string> {
     if (!this.#defs.has(kind)) throw new Error(`Unknown flow kind "${kind}"`);
     const id = ulid();
+    // Pin the newest published version, if the flow was published at all. A flow that
+    // was only registered in memory records none, and resuming it depends on the
+    // process holding the same code -- which publish() exists to avoid.
+    const v = await this.#db.query<{ id: string }>(
+      `select id from flow_versions where kind = $1 order by version desc limit 1`,
+      [kind],
+    );
     await this.#db.query(
-      `insert into flow_runs (id, kind, tenant_id, workspace_id, project_id, input, state)
-       values ($1,$2,$3,$4,$5,$6,'queued')`,
-      [id, kind, scope.tenantId, scope.workspaceId, scope.projectId ?? null, JSON.stringify(input)],
+      `insert into flow_runs (id, kind, flow_version_id, tenant_id, workspace_id, project_id, input, state)
+       values ($1,$2,$3,$4,$5,$6,$7,'queued')`,
+      [
+        id, kind, v.rows[0]?.id ?? null,
+        scope.tenantId, scope.workspaceId, scope.projectId ?? null, JSON.stringify(input),
+      ],
     );
     return id;
   }
@@ -151,18 +208,33 @@ export class StepRuntime {
     return r.rows.map((x) => x.id);
   }
 
-  async #recordStepStarted(
+  /**
+   * Claim a step atomically. Returns false when another executor already holds it.
+   *
+   * This has to be one statement. Read-then-write let two executors on the same run --
+   * which an expired lease guarantees will happen -- both see "no row", both mark
+   * started, and both run the side effect. The conditional WHERE makes the database
+   * the arbiter: exactly one UPDATE touches a row.
+   */
+  async #claimStep(
     runId: string,
     key: string,
     idempotent: boolean,
     attempt: number,
-  ): Promise<void> {
-    await this.#db.query(
-      `insert into flow_steps (run_id, step_key, state, idempotent, attempt)
-       values ($1,$2,'started',$3,$4)
-       on conflict (run_id, step_key) do update set state = 'started', attempt = $4`,
-      [runId, key, idempotent, attempt],
+    leaseMs: number,
+  ): Promise<boolean> {
+    const until = new Date(Date.now() + leaseMs).toISOString();
+    const r = await this.#db.query<{ step_key: string }>(
+      `insert into flow_steps (run_id, step_key, state, idempotent, attempt, claim_until)
+       values ($1,$2,'started',$3,$4,$5)
+       on conflict (run_id, step_key) do update
+         set state = 'started', attempt = $4, claim_until = $5
+         where flow_steps.state <> 'completed'
+           and (flow_steps.claim_until is null or flow_steps.claim_until < now())
+       returning step_key`,
+      [runId, key, idempotent, attempt, until],
     );
+    return r.rows.length > 0;
   }
 
   /**
@@ -209,9 +281,14 @@ export class StepRuntime {
     let spent = Number(row.spent_micros ?? 0) / 1e6;
     const self = this;
 
+    const maxAttempts = def.maxAttempts ?? 3;
     const ctx: StepCtx = {
       runId,
       attempt,
+      willRetry: (err: unknown) => {
+        const deterministic = err instanceof KernelError && !err.retryable;
+        return !deterministic && attempt < maxAttempts;
+      },
       scope,
       signal: abort.signal,
       budget: {
@@ -255,12 +332,15 @@ export class StepRuntime {
 
         // Committed before the side effect runs, so an interrupted non-idempotent step
         // is detectable on resume rather than silently repeated.
-        await self.#recordStepStarted(runId, key, idempotent, attempt);
+        const claimed = await self.#claimStep(runId, key, idempotent, attempt, self.#leaseMs);
+        if (!claimed) {
+          throw new StepHeldElsewhere(runId, key);
+        }
 
         try {
           const out = await fn();
           await self.#db.query(
-            `update flow_steps set state = 'completed', output = $3, at = now()
+            `update flow_steps set state = 'completed', output = $3, claim_until = null, at = now()
              where run_id = $1 and step_key = $2`,
             [runId, key, JSON.stringify(out ?? null)],
           );
@@ -271,7 +351,7 @@ export class StepRuntime {
           const state =
             err instanceof SuspendRun ? "suspended" : idempotent ? "failed" : "ambiguous";
           await self.#db.query(
-            `update flow_steps set state = $4, error = $3, at = now()
+            `update flow_steps set state = $4, error = $3, claim_until = null, at = now()
              where run_id = $1 and step_key = $2`,
             [runId, key, JSON.stringify(serializeError(err)), state],
           );
@@ -297,7 +377,6 @@ export class StepRuntime {
         );
         return (await this.get(runId))!;
       }
-      const maxAttempts = def.maxAttempts ?? 3;
       // A deterministic error will fail identically on every attempt; do not burn retries.
       const deterministic = err instanceof KernelError && !err.retryable;
       const terminal = attempt >= maxAttempts || deterministic;

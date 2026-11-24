@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { SuspendRun } from "@harness/kernel";
-import { defineNode, type NodeType } from "./types.ts";
+import { defineNode, EgressDenied, type NodeType } from "./types.ts";
 import { NodeRegistry } from "./registry.ts";
 
 /** Seed state with a literal. The cheapest way to start a graph. */
@@ -108,28 +108,65 @@ export function agentNode(
   });
 }
 
-/** HTTP egress. Non-idempotent for unsafe methods: an interrupted POST must not replay. */
+/**
+ * HTTP egress, default-deny.
+ *
+ * Reach is the intersection of the workspace policy and the node's own list. An
+ * earlier version treated an empty node list as "allow everything" and had no
+ * workspace layer at all, which meant the attacker in the threat model wrote their own
+ * policy. Redirects are not followed: a permitted host that 302s to the cloud metadata
+ * address would otherwise bypass the check entirely.
+ */
 export function httpNode(fetchImpl: typeof fetch = fetch) {
   return defineNode({
     type: "http.request",
     configSchema: z.object({
       method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]).default("GET"),
       allowHosts: z.array(z.string()).default([]),
+      /** Up to this many redirects, each re-checked against the policy. */
+      maxRedirects: z.number().int().min(0).max(5).default(0),
     }),
     inputSchema: z.object({ url: z.string().url(), body: z.unknown().optional() }),
     outputSchema: z.object({ status: z.number(), body: z.unknown() }),
     idempotent: false,
-    async execute(_ctx, config, input) {
-      const host = new URL(input.url).hostname;
-      // Node-level egress allowlist: an agent-authored flow cannot reach arbitrary hosts.
-      if (config.allowHosts.length && !config.allowHosts.includes(host)) {
-        throw new Error(`host "${host}" is not in this node's egress allowlist`);
+    async execute(ctx, config, input) {
+      const workspace = ctx.egress?.allowHosts ?? [];
+      const permitted = config.allowHosts.length
+        ? workspace.filter((h) => config.allowHosts.includes(h))
+        : workspace;
+
+      const check = (url: string): string => {
+        const u = new URL(url);
+        if (u.protocol !== "https:" && u.hostname !== "localhost") {
+          throw new EgressDenied(u.hostname, "only https is permitted");
+        }
+        if (permitted.length === 0) {
+          throw new EgressDenied(u.hostname, "this workspace permits no outbound requests from flows");
+        }
+        if (!permitted.includes(u.hostname)) {
+          throw new EgressDenied(u.hostname, "not in the workspace egress allowlist");
+        }
+        return url;
+      };
+
+      let url = check(input.url);
+      let res: Response;
+      for (let hop = 0; ; hop++) {
+        res = await fetchImpl(url, {
+          method: config.method,
+          redirect: "manual",
+          body: input.body === undefined ? undefined : JSON.stringify(input.body),
+          headers: input.body === undefined ? undefined : { "content-type": "application/json" },
+        });
+        const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
+        if (!location) break;
+        if (hop >= config.maxRedirects) {
+          throw new EgressDenied(new URL(url).hostname, `redirected, and maxRedirects is ${config.maxRedirects}`);
+        }
+        // Re-check every hop against the same policy.
+        url = check(new URL(location, url).toString());
       }
-      const res = await fetchImpl(input.url, {
-        method: config.method,
-        body: input.body === undefined ? undefined : JSON.stringify(input.body),
-        headers: input.body === undefined ? undefined : { "content-type": "application/json" },
-      });
+
       const text = await res.text();
       let body: unknown = text;
       try {

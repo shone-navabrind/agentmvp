@@ -2,6 +2,52 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { readFile } from "node:fs/promises";
 import { join, extname } from "node:path";
 import { buildDemo, type Demo } from "./demo-data.ts";
+import { KernelError, type Subject } from "@harness/kernel";
+
+/**
+ * The capability each route needs. Previously authz existed, was tested, and guarded
+ * nothing: the only caller reported decisions to the UI. Now every route is listed
+ * here and refused before its handler runs.
+ */
+const ROUTE_CAPABILITY: Record<string, string> = {
+  "/api/v1/project": "project:read",
+  "/api/v1/sessions": "project:read",
+  "/api/v1/board": "project:read",
+  "/api/v1/flows": "project:read",
+  "/api/v1/triggers": "project:read",
+  "/api/v1/blueprints": "project:read",
+  "/api/v1/events": "project:read",
+  "/api/v1/scope": "project:read",
+  "/api/v1/authz": "project:read",
+  "/api/v1/plugins": "plugin:install",
+  "/api/v1/billing": "workspace:budget:manage",
+};
+
+function capabilityFor(path: string): string | undefined {
+  if (ROUTE_CAPABILITY[path]) return ROUTE_CAPABILITY[path];
+  // A session transcript is project data like any other.
+  if (path.startsWith("/api/v1/sessions/")) return "project:read";
+  return undefined;
+}
+
+/**
+ * Until authentication lands (K0) there is no real caller to identify, so the viewer
+ * is resolved from a header for development. This is deliberately a single function:
+ * when K0 arrives it is the only thing that changes.
+ */
+function subjectFor(req: IncomingMessage): Subject {
+  const role = String(req.headers["x-harness-role"] ?? "operator");
+  const known = ["member", "admin", "superadmin"];
+  const mapped = role === "guided" ? "member" : role === "builder" ? "admin" : "superadmin";
+  return {
+    kind: "user",
+    id: `dev-${role}`,
+    assignments: [
+      { role: known.includes(mapped) ? mapped : "superadmin", scope: "workspace", scopeId: "ws1" },
+      { role: "superadmin", scope: "tenant", scopeId: "t1" },
+    ].slice(0, mapped === "superadmin" ? 2 : 1) as Subject["assignments"],
+  };
+}
 
 /** Blank out every secret binding value wherever it appears in generated text. */
 function redactSecrets(
@@ -201,6 +247,22 @@ export async function start(port: number, webRoot: string): Promise<{ close: () 
     void (async () => {
       const url = new URL(req.url ?? "/", "http://localhost");
       try {
+        // Authorization happens here, once, before any handler. No route reaches its
+        // body without a decision having been made and recorded.
+        const needed = capabilityFor(url.pathname);
+        if (needed) {
+          const decision = demo.kernel.authz.can(subjectFor(req), needed, {
+            tenantId: "t1",
+            workspaceId: "ws1",
+            projectId: "p1",
+          });
+          if (!decision.allowed) {
+            res.writeHead(403, { "content-type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ error: "forbidden", capability: needed, reason: decision.reason }));
+            return;
+          }
+        }
+
         const data = await routes(demo, url.pathname);
         if (data !== undefined) {
           const body = JSON.stringify(data, (_k, v) => (typeof v === "bigint" ? String(v) : v));

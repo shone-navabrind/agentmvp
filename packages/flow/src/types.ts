@@ -46,10 +46,27 @@ export type Graph = {
   guards?: Guards;
   /** Mapping from run state to the flow's return value. */
   output?: Record<string, Ref>;
+  /**
+   * Secrets this graph references but does not contain. The executor resolves each
+   * into the environment before running, so no value is ever persisted on the run.
+   */
+  requiresSecrets?: Array<{ key: string; ref: string }>;
+};
+
+/**
+ * Set by the workspace, never by the flow. A flow author supplies a node's allowHosts;
+ * the effective reach is the intersection of the two, so authoring a flow cannot widen
+ * what the workspace permits.
+ */
+export type EgressPolicy = {
+  /** Hosts this workspace permits at all. Empty means no outbound HTTP from a flow. */
+  allowHosts: string[];
 };
 
 export type NodeCtx = {
   step: StepCtx["step"];
+  /** Absent means no policy was supplied, which is treated as deny-all. */
+  egress?: EgressPolicy;
   emit: StepCtx["emit"];
   budget: StepCtx["budget"];
   signal: AbortSignal;
@@ -70,6 +87,12 @@ export type NodeType<C = unknown, I = unknown, O = unknown> = {
   /** Nodes that suspend the run (human approval) declare it so validation can reason about it. */
   suspends?: boolean;
   execute(ctx: NodeCtx, config: C, input: I): Promise<O>;
+  /**
+   * Undo this node's effect. Called in reverse order over the nodes that completed
+   * when a later node fails the run. A node with no compensator leaves its effect in
+   * place, which is correct for reads and wrong for anything that allocated.
+   */
+  compensate?(ctx: NodeCtx, config: C, input: I, output: O): Promise<void>;
 };
 
 export class GraphInvalid extends KernelError {
@@ -100,6 +123,12 @@ export class StepOutputInvalid extends KernelError {
   }
 }
 
+export class EgressDenied extends KernelError {
+  constructor(host: string, reason: string) {
+    super("EGRESS_DENIED", `Outbound request to "${host}" refused: ${reason}`, { host, reason }, false);
+  }
+}
+
 export class GuardTripped extends KernelError {
   constructor(guard: string, detail: Record<string, unknown>) {
     super("GUARD_TRIPPED", `Flow halted: ${guard}`, { guard, ...detail }, false);
@@ -119,6 +148,12 @@ export function defineNode<C extends ZodType, I extends ZodType, O extends ZodTy
     config: C["_output"],
     input: I["_output"],
   ): Promise<O["_output"]>;
+  compensate?(
+    ctx: NodeCtx,
+    config: C["_output"],
+    input: I["_output"],
+    output: O["_output"],
+  ): Promise<void>;
 }): NodeType<C["_output"], I["_output"], O["_output"]> {
   return d as NodeType<C["_output"], I["_output"], O["_output"]>;
 }

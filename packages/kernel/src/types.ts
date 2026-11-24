@@ -125,6 +125,18 @@ export class SuspendRun extends KernelError {
   }
 }
 
+/** Another executor holds this step. Retrying the run later is safe; running now is not. */
+export class StepHeldElsewhere extends KernelError {
+  constructor(runId: string, stepKey: string) {
+    super(
+      "STEP_HELD_ELSEWHERE",
+      `Step "${stepKey}" is already claimed by another executor`,
+      { runId, stepKey },
+      true,
+    );
+  }
+}
+
 export class AmbiguousStep extends KernelError {
   constructor(runId: string, stepKey: string) {
     super(

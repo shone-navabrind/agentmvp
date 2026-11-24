@@ -4,8 +4,9 @@ import { z } from "zod";
 import { openMemoryDb } from "./db.ts";
 import { createKernel, type Kernel } from "./kernel.ts";
 import { SCOPE } from "./fixtures.ts";
-import { AmbiguousStep, type Db } from "./types.ts";
+import { AmbiguousStep, StepHeldElsewhere, type Db } from "./types.ts";
 import { BudgetExceeded, type FlowDefinition } from "./steps.ts";
+import { Worker } from "./worker.ts";
 
 type ProvisionOut = { vmId: string; cert: string; bundles: number };
 
@@ -286,6 +287,75 @@ describe("durable step runtime", () => {
   });
 });
 
+describe("D5: two executors must not both run one side effect", () => {
+  test("concurrent executors on the same run claim each step exactly once", async () => {
+    const { k, close } = await newKernel();
+    const charges: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+
+    k.steps.register({
+      kind: "charge-once",
+      maxAttempts: 1,
+      async run(ctx) {
+        return ctx.step(
+          "charge-card",
+          async () => {
+            charges.push(`attempt-${ctx.attempt}`);
+            await gate; // hold the step open so both executors overlap
+            return { charged: true };
+          },
+          { idempotent: false },
+        );
+      },
+    });
+
+    const runId = await k.steps.start("charge-once", {}, SCOPE);
+
+    // Two executors race on the same run, which is exactly what an expired lease
+    // produces in production.
+    const a = k.steps.execute(runId);
+    await new Promise((r) => setTimeout(r, 60));
+    const b = k.steps.execute(runId);
+    release();
+    const [ra, rb] = await Promise.all([a, b]);
+
+    assert.equal(charges.length, 1, `the side effect ran ${charges.length} times, expected 1`);
+    const states = [ra.state, rb.state];
+    assert.ok(states.includes("completed"), "one executor finished the run");
+    await close();
+  });
+
+  test("the loser is told it is held elsewhere, and that is retryable", () => {
+    const e = new StepHeldElsewhere("run-1", "charge-card");
+    assert.equal(e.code, "STEP_HELD_ELSEWHERE");
+    assert.equal(e.retryable, true, "the run can be picked up again once the holder finishes");
+  });
+
+  test("a completed step is never re-claimed, only replayed", async () => {
+    const { k, close } = await newKernel();
+    let ran = 0;
+    k.steps.register({
+      kind: "memo",
+      maxAttempts: 3,
+      async run(ctx) {
+        const first = await ctx.step("once", async () => {
+          ran++;
+          return { n: ran };
+        });
+        if (ctx.attempt === 1) throw new Error("crash after the first step");
+        return first;
+      },
+    });
+    const runId = await k.steps.start("memo", {}, SCOPE);
+    await k.steps.execute(runId);
+    const done = await k.steps.execute(runId);
+    assert.equal(ran, 1, "replayed from the stored result rather than re-claimed");
+    assert.deepEqual(done.output, { n: 1 });
+    await close();
+  });
+});
+
 describe("AmbiguousStep", () => {
   test("carries the run and step so an operator can act on it", () => {
     const e = new AmbiguousStep("run-1", "charge-card");
@@ -299,5 +369,175 @@ describe("BudgetExceeded", () => {
     const e = new BudgetExceeded(0.12, 0.1);
     assert.equal(e.code, "BUDGET_EXCEEDED");
     assert.deepEqual(e.details, { spent: 0.12, limit: 0.1 });
+  });
+});
+
+describe("D4: a worker drives runs, and a dead one is recovered", () => {
+  test("a queued run is claimed and executed without anyone calling execute()", async () => {
+    const { k, db, close } = await newKernel();
+    const ran: string[] = [];
+    k.steps.register({
+      kind: "background",
+      async run(ctx) {
+        ran.push(ctx.runId);
+        return ctx.step("work", async () => ({ ok: true }));
+      },
+    });
+
+    const runId = await k.steps.start("background", {}, SCOPE);
+    const w = new Worker(db, k.steps, { concurrency: 2 });
+
+    assert.equal(await w.tick(), 1, "the worker found and ran it");
+    assert.deepEqual(ran, [runId]);
+    assert.equal((await k.steps.get(runId))!.state, "completed");
+    assert.equal(w.stats.completed, 1);
+    await close();
+  });
+
+  test("two workers never claim the same run", async () => {
+    const { k, db, close } = await newKernel();
+    const ran: string[] = [];
+    k.steps.register({
+      kind: "once-only",
+      async run(ctx) {
+        ran.push(ctx.runId);
+        return ctx.step("w", async () => ({ ok: true }));
+      },
+    });
+    for (let i = 0; i < 6; i++) await k.steps.start("once-only", {}, SCOPE);
+
+    const a = new Worker(db, k.steps, { concurrency: 3 });
+    const b = new Worker(db, k.steps, { concurrency: 3 });
+    await Promise.all([a.tick(), b.tick()]);
+
+    assert.equal(ran.length, new Set(ran).size, "no run was executed twice");
+    assert.equal(a.stats.claimed + b.stats.claimed, ran.length);
+    await close();
+  });
+
+  test("a run abandoned by a dead worker is reclaimed", async () => {
+    const { k, db, close } = await newKernel();
+    k.steps.register({
+      kind: "orphaned",
+      async run(ctx) {
+        return ctx.step("w", async () => ({ ok: true }));
+      },
+    });
+    const runId = await k.steps.start("orphaned", {}, SCOPE);
+
+    // Simulate a worker that claimed the run and then vanished.
+    await db.query(`update flow_runs set state='running', lease_until=$2 where id=$1`, [
+      runId,
+      new Date(Date.now() - 60_000).toISOString(),
+    ]);
+
+    const w = new Worker(db, k.steps);
+    assert.equal(await w.tick(), 1, "the expired lease was reclaimed");
+    assert.equal((await k.steps.get(runId))!.state, "completed");
+    await close();
+  });
+
+  test("a live run's lease is renewed, so it is not stolen mid-flight", async () => {
+    const { k, db, close } = await newKernel();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    k.steps.register({
+      kind: "slow",
+      async run(ctx) {
+        return ctx.step("slow-work", async () => {
+          await gate;
+          return { ok: true };
+        });
+      },
+    });
+    const runId = await k.steps.start("slow", {}, SCOPE);
+
+    // A 200ms lease renewed every 50ms: without renewal it would expire mid-run.
+    const w = new Worker(db, k.steps, { renewMs: 50, concurrency: 1 });
+    const inFlight = w.tick(200);
+    await new Promise((r) => setTimeout(r, 320));
+
+    const thief = new Worker(db, k.steps);
+    assert.equal(await thief.claimOne(200), null, "nobody could steal the live run");
+    assert.ok(w.stats.renewals >= 2, `lease was renewed (${w.stats.renewals} times)`);
+
+    release();
+    await inFlight;
+    assert.equal((await k.steps.get(runId))!.state, "completed");
+    await close();
+  });
+
+  test("start/stop runs the loop and drains cleanly", async () => {
+    const { k, db, close } = await newKernel();
+    k.steps.register({
+      kind: "looped",
+      async run(ctx) {
+        return ctx.step("w", async () => ({ ok: true }));
+      },
+    });
+    const w = new Worker(db, k.steps, { pollMs: 20 });
+    w.start();
+    const runId = await k.steps.start("looped", {}, SCOPE);
+    for (let i = 0; i < 50 && (await k.steps.get(runId))!.state !== "completed"; i++) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    await w.stop();
+    assert.equal((await k.steps.get(runId))!.state, "completed");
+    assert.deepEqual(w.inFlight, []);
+    await close();
+  });
+});
+
+describe("D6: a run is pinned to the definition it started with", () => {
+  const graphV1 = { name: "release", nodes: [{ id: "a" }], edges: [] };
+  const graphV2 = { name: "release", nodes: [{ id: "a" }, { id: "b" }], edges: [] };
+
+  test("publishing the same definition twice does not create a second version", async () => {
+    const { k, close } = await newKernel();
+    const a = await k.steps.publish("graph:release", graphV1);
+    const b = await k.steps.publish("graph:release", graphV1);
+    assert.equal(a.id, b.id);
+    assert.equal(a.version, 1);
+    await close();
+  });
+
+  test("editing the definition creates a new version and leaves the old run on the old one", async () => {
+    const { k, close } = await newKernel();
+    k.steps.register({ kind: "graph:release", async run() { return { ok: true }; } });
+
+    await k.steps.publish("graph:release", graphV1);
+    const oldRun = await k.steps.start("graph:release", {}, SCOPE);
+
+    const v2 = await k.steps.publish("graph:release", graphV2);
+    assert.equal(v2.version, 2);
+    const newRun = await k.steps.start("graph:release", {}, SCOPE);
+
+    const pinnedOld = await k.steps.pinnedDefinition(oldRun);
+    const pinnedNew = await k.steps.pinnedDefinition(newRun);
+    assert.equal(pinnedOld!.version, 1, "the in-flight run still sees v1");
+    assert.equal(pinnedNew!.version, 2);
+    assert.deepEqual(pinnedOld!.graph, graphV1);
+    await close();
+  });
+
+  test("the pinned graph is stored, so a run is resumable without the author's code", async () => {
+    const { k, close } = await newKernel();
+    k.steps.register({ kind: "graph:release", async run() { return { ok: true }; } });
+    await k.steps.publish("graph:release", graphV1);
+    const runId = await k.steps.start("graph:release", {}, SCOPE);
+
+    const pinned = await k.steps.pinnedDefinition(runId);
+    assert.deepEqual(pinned!.graph, graphV1, "the definition came from the database, not memory");
+    await close();
+  });
+
+  test("a digest change is what makes a new version, not a republish", async () => {
+    const { k, close } = await newKernel();
+    const a = await k.steps.publish("graph:x", { a: 1 });
+    const b = await k.steps.publish("graph:x", { a: 2 });
+    const c = await k.steps.publish("graph:x", { a: 1 });
+    assert.notEqual(a.digest, b.digest);
+    assert.equal(a.id, c.id, "identical content reuses the existing version");
+    await close();
   });
 });

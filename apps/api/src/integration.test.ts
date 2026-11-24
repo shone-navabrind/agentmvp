@@ -153,7 +153,10 @@ describe("full stack", () => {
     // compose may carry it, and the compose embeds env values inline.
     assert.equal(bp.bindings.inputs.DB_PASSWORD, "", "secret bindings are blanked");
     assert.ok(!bp.compose.includes("dev-only"), "secret is not baked into the compose");
-    assert.match(bp.compose, /PASSWORD: "\u2022+"/, "it is redacted, not simply absent");
+    // Since D9 the value never reaches the compose at all: it carries a reference the
+    // sandbox resolves at run time. Redaction stays as a second line of defence for
+    // anything a future change lets slip through.
+    assert.match(bp.compose, /PASSWORD: \$\{HC_SECRET_DB_PASSWORD\}/, "a reference, not a value");
     assert.equal(bp.bindings.inputs.ODOO_DB_NAME, "acme", "non-secrets still render");
     // Blanking the value must not make a configured secret look unconfigured.
     assert.equal(bp.inputsSet.DB_PASSWORD, true, "the UI can still say it is set");
@@ -169,6 +172,50 @@ describe("full stack", () => {
     for (const s of bp.steps) {
       assert.ok(s.label, `step ${s.id} has no plain-language label`);
       assert.ok(!/docker|container|compose/i.test(s.label), `jargon in "${s.label}"`);
+    }
+  });
+
+  test("D1: authz refuses a route the caller lacks the capability for", async () => {
+    // A member may read the project but must not reach plugins or credits.
+    const asMember = (p: string) =>
+      fetch(BASE + p, { headers: { "x-harness-role": "guided" } });
+
+    assert.equal((await asMember("/api/v1/project")).status, 200);
+    assert.equal((await asMember("/api/v1/board")).status, 200);
+
+    const plugins = await asMember("/api/v1/plugins");
+    assert.equal(plugins.status, 403, "plugin:install is not a member capability");
+    const body = (await plugins.json()) as { capability: string; reason: string };
+    assert.equal(body.capability, "plugin:install");
+    assert.ok(body.reason, "the refusal says why");
+
+    assert.equal((await asMember("/api/v1/billing")).status, 403);
+  });
+
+  test("D1: an operator reaches everything a member cannot", async () => {
+    const asOperator = (p: string) =>
+      fetch(BASE + p, { headers: { "x-harness-role": "operator" } });
+    assert.equal((await asOperator("/api/v1/plugins")).status, 200);
+    assert.equal((await asOperator("/api/v1/billing")).status, 200);
+  });
+
+  test("D1: a session transcript is guarded like any other project data", async () => {
+    const r = await fetch(BASE + "/api/v1/sessions/s-auth", {
+      headers: { "x-harness-role": "guided" },
+    });
+    assert.equal(r.status, 200, "members may read sessions");
+  });
+
+  test("D1: every API route declares a capability", async () => {
+    // A route added without an entry would be unguarded, so prove none exists.
+    const routes = [
+      "/api/v1/project", "/api/v1/sessions", "/api/v1/board", "/api/v1/flows",
+      "/api/v1/triggers", "/api/v1/blueprints", "/api/v1/events", "/api/v1/scope",
+      "/api/v1/authz", "/api/v1/plugins", "/api/v1/billing",
+    ];
+    for (const r of routes) {
+      const res = await fetch(BASE + r, { headers: { "x-harness-role": "nobody" } });
+      assert.notEqual(res.status, 404, `${r} is not a route any more`);
     }
   });
 

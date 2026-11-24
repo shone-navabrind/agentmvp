@@ -56,10 +56,25 @@ create table if not exists projection_checkpoints (
   updated_at      timestamptz not null default now()
 );
 
+-- A run pins the exact definition it started with. Without this, editing a graph and
+-- restarting the process silently resumed every in-flight run against the new
+-- definition, which the design explicitly says is unsupported.
+create table if not exists flow_versions (
+  id          text primary key,
+  kind        text not null,
+  version     int  not null,
+  graph       jsonb not null,
+  digest      text not null,
+  created_at  timestamptz not null default now(),
+  unique (kind, version)
+);
+create index if not exists flow_versions_kind on flow_versions (kind, version desc);
+
 create table if not exists flow_runs (
-  id            text primary key,
-  kind          text not null,
-  tenant_id     text not null,
+  id              text primary key,
+  kind            text not null,
+  flow_version_id text references flow_versions(id),
+  tenant_id       text not null,
   workspace_id  text not null,
   project_id    text,
   input         jsonb not null,
@@ -83,6 +98,9 @@ create table if not exists flow_steps (
   output     jsonb,
   error      jsonb,
   attempt    int not null default 0,
+  -- Held by whichever executor claimed this step. The conditional upsert in
+  -- #claimStep refuses a second claim while this is in the future.
+  claim_until timestamptz,
   at         timestamptz not null default now(),
   primary key (run_id, step_key)
 );

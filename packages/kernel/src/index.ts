@@ -10,3 +10,4 @@ export * from "./authz.ts";
 export * from "./secrets.ts";
 export * from "./outbox.ts";
 export * from "./kernel.ts";
+export * from "./worker.ts";
