@@ -65,14 +65,27 @@ export class ProjectionRunner {
       const events = await this.#log.readAll({ afterId: cursor, limit: batch, types: p.types });
       if (events.length === 0) break;
       // One transaction per batch: the checkpoint advances with the writes it describes,
-      // so a crash mid-batch replays the batch rather than skipping it.
-      await this.#db.tx(async (tx) => {
+      // so a crash mid-batch replays the batch rather than skipping it. The checkpoint row
+      // is locked first: if a concurrent run already moved it, this batch was applied
+      // there, so skip it and resume from where that run got to instead of applying twice.
+      const moved = await this.#db.tx(async (tx) => {
+        const r = await tx.query<{ last_event_id: string | null }>(
+          `select last_event_id from projection_checkpoints where name = $1 for update`,
+          [p.name],
+        );
+        const current = r.rows[0]?.last_event_id ?? null;
+        if (current !== cursor) return { current };
         for (const ev of events) await p.apply(tx, ev);
         await tx.query(
           `update projection_checkpoints set last_event_id = $2, updated_at = now() where name = $1`,
           [p.name, events[events.length - 1].cursor],
         );
+        return null;
       });
+      if (moved) {
+        cursor = moved.current;
+        continue;
+      }
       applied += events.length;
       cursor = events[events.length - 1].cursor;
       if (events.length < batch) break;

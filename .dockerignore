@@ -8,3 +8,5 @@ docs/screenshots
 *.log
 .DS_Store
 skills-lock.json
+.data
+.env

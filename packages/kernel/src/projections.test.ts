@@ -99,6 +99,26 @@ describe("projections", () => {
     await mem.close();
   });
 
+  test("concurrent runs never apply the same event twice", async () => {
+    // Over a connection pool, overlapping runs read the same cursor. Without a lock on
+    // the checkpoint both applied the batch, double-counting every event.
+    const mem = await openMemoryDb();
+    const k = await createKernel(mem.db, { ephemeralSecrets: true });
+    defineBoardEvents(k.registry);
+    for (let i = 0; i < 5; i++) {
+      await k.log.append({ ...SCOPE, stream: "project:r", type: "task.created", payload: { taskId: `R${i}`, title: "r", state: "todo" }, actor: USER });
+    }
+    await k.projections.run(boardProjection);
+    for (let i = 0; i < 3; i++) {
+      await k.log.append({ ...SCOPE, stream: "project:r", type: "task.moved.v2", payload: { taskId: "R0", from: "todo", to: "doing" }, actor: USER });
+    }
+    const runs = await Promise.all(Array.from({ length: 6 }, () => k.projections.run(boardProjection)));
+    assert.equal(runs.reduce((a, r) => a + r.applied, 0), 3, "each event applied exactly once");
+    const row = await mem.db.query<{ moves: number }>(`select moves from board_tasks where task_id = 'R0'`);
+    assert.equal(Number(row.rows[0].moves), 3);
+    await mem.close();
+  });
+
   test("a projection crash mid-batch replays the batch rather than skipping it", async () => {
     const mem = await openMemoryDb();
     const k = await createKernel(mem.db, { ephemeralSecrets: true });

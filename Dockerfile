@@ -14,6 +14,15 @@ ENV NODE_ENV=production \
 
 WORKDIR /app
 
+# git: per-session worktrees of the project's repository. Claude Code: the agent each
+# session runs. Both are runtime dependencies, not build tools.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git ca-certificates \
+ && rm -rf /var/lib/apt/lists/* \
+ && npm install -g @anthropic-ai/claude-code \
+ && npm cache clean --force \
+ && mkdir -p /data && chown node:node /data
+
 # Manifests first, so a dependency install is cached across source edits. Every
 # workspace manifest must be present before `npm ci` can resolve the workspace graph.
 COPY package.json package-lock.json ./
@@ -36,8 +45,10 @@ COPY packages/ packages/
 COPY apps/api/ apps/api/
 COPY apps/web/public/ apps/web/public/
 
-# The image ships no credentials. The API reads none today; when it does, they arrive
-# as environment variables at run time, never baked in here.
+# The image ships no credentials: ANTHROPIC_API_KEY (or CLAUDE_CODE_OAUTH_TOKEN) arrives
+# as an environment variable at run time, never baked in here.
+ENV HARNESS_DATA_DIR=/data
+VOLUME /data
 USER node
 
 EXPOSE 8787
@@ -45,6 +56,6 @@ EXPOSE 8787
 # Hits the real API rather than just the port, so an app that boots but cannot serve
 # is reported unhealthy. Kept short: a long timeout hides a hung process.
 HEALTHCHECK --interval=10s --timeout=3s --start-period=40s --retries=5 \
-  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||8787)+'/api/v1/project').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||8787)+'/api/v1/workspace').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 CMD ["node", "--experimental-strip-types", "apps/api/src/main.ts"]

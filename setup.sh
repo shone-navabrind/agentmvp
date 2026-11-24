@@ -75,7 +75,7 @@ run_docker() {
   step "Starting"
   PORT="$PORT" docker compose up -d
   step "Waiting for it to answer"
-  if wait_for_http "http://localhost:${PORT}/api/v1/project" 90; then
+  if wait_for_http "http://localhost:${PORT}/api/v1/workspace" 90; then
     ok "healthy"
     ready
     say "  ${DIM}logs   docker compose logs -f${OFF}"
