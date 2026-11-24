@@ -38,8 +38,11 @@ export type FileOps = {
 /** Environment Claude Code needs to talk to the gateway instead of api.anthropic.com. */
 export function claudeEnv(cfg: HarnessConfig, model: string): Record<string, string> {
   return {
-    ANTHROPIC_BASE_URL: cfg.gatewayBaseUrl,
-    ANTHROPIC_AUTH_TOKEN: cfg.projectKey,
+    // No gateway configured (K4 not deployed): leave these unset so the CLI falls back to
+    // the operator's own ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN. An empty value
+    // would override them and break auth.
+    ...(cfg.gatewayBaseUrl ? { ANTHROPIC_BASE_URL: cfg.gatewayBaseUrl } : {}),
+    ...(cfg.projectKey ? { ANTHROPIC_AUTH_TOKEN: cfg.projectKey } : {}),
     ANTHROPIC_MODEL: model,
     // Claude Code otherwise probes for an OAuth token and prompts interactively.
     CLAUDE_CODE_NONINTERACTIVE: "1",
@@ -60,6 +63,10 @@ export function claudeArgv(opts: { model: string; cwd: string }): string[] {
     opts.model,
     "--add-dir",
     opts.cwd,
+    // Nothing answers permission prompts in -p mode, so without this every edit or
+    // command is silently denied. The sandbox, not a prompt, is the boundary.
+    "--permission-mode",
+    "bypassPermissions",
   ];
 }
 

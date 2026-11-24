@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { readFile } from "node:fs/promises";
 import { join, extname } from "node:path";
 import { buildDemo, type Demo } from "./demo-data.ts";
+import { buildApp, HttpError } from "./app.ts";
 import { KernelError, type Subject } from "@harness/kernel";
 
 /**
@@ -10,6 +11,7 @@ import { KernelError, type Subject } from "@harness/kernel";
  * here and refused before its handler runs.
  */
 const ROUTE_CAPABILITY: Record<string, string> = {
+  "/api/v1/workspace": "project:read",
   "/api/v1/project": "project:read",
   "/api/v1/sessions": "project:read",
   "/api/v1/board": "project:read",
@@ -23,7 +25,18 @@ const ROUTE_CAPABILITY: Record<string, string> = {
   "/api/v1/billing": "workspace:budget:manage",
 };
 
-function capabilityFor(path: string): string | undefined {
+/** Writes are listed the same way: a POST with no entry here is refused, not let through. */
+const WRITE_CAPABILITY: Array<[RegExp, string]> = [
+  [/^\/api\/v1\/projects$/, "workspace:projects:create"],
+  [/^\/api\/v1\/projects\/[^/]+\/blueprint$/, "project:write"],
+  [/^\/api\/v1\/sessions$/, "project:write"],
+  [/^\/api\/v1\/sessions\/[^/]+\/messages$/, "project:chat"],
+  [/^\/api\/v1\/board\/tasks$/, "project:write"],
+  [/^\/api\/v1\/board\/tasks\/[^/]+\/move$/, "project:write"],
+];
+
+function capabilityFor(path: string, method = "GET"): string | undefined {
+  if (method !== "GET") return WRITE_CAPABILITY.find(([re]) => re.test(path))?.[1];
   if (ROUTE_CAPABILITY[path]) return ROUTE_CAPABILITY[path];
   // A session transcript is project data like any other.
   if (path.startsWith("/api/v1/sessions/")) return "project:read";
@@ -240,45 +253,120 @@ async function routes(demo: Demo, path: string): Promise<unknown | undefined> {
   return undefined;
 }
 
-export async function start(port: number, webRoot: string): Promise<{ close: () => Promise<void> }> {
+async function readJson(req: IncomingMessage): Promise<unknown> {
+  let size = 0;
+  const chunks: Buffer[] = [];
+  for await (const c of req) {
+    size += (c as Buffer).length;
+    if (size > 1_000_000) throw new HttpError(413, "Request body too large");
+    chunks.push(c as Buffer);
+  }
+  if (!size) return {};
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    throw new HttpError(400, "Body is not valid JSON");
+  }
+}
+
+type Handler = {
+  get(path: string, q: URLSearchParams): Promise<unknown>;
+  post(path: string, body: unknown): Promise<unknown>;
+  authz: Demo["kernel"]["authz"];
+  close(): Promise<void>;
+};
+
+async function demoHandler(): Promise<Handler> {
   const demo = await buildDemo();
+  return {
+    authz: demo.kernel.authz,
+    async get(path) {
+      if (path === "/api/v1/workspace") {
+        return {
+          demo: true,
+          onboarded: true,
+          workspace: "Navabrind IT",
+          projects: [{ id: "p1", name: "acme-platform" }],
+          agent: { available: false, reason: "This is the read-only demo scenario.", model: "claude-sonnet-5-5" },
+        };
+      }
+      return routes(demo, path);
+    },
+    async post() {
+      throw new HttpError(405, "The demo (HARNESS_DEMO=1) is read-only. Start without it to use the real app.");
+    },
+    close: demo.close,
+  };
+}
+
+async function appHandler(dataDir: string, databaseUrl?: string): Promise<Handler> {
+  const app = await buildApp({ dataDir, databaseUrl });
+  return {
+    authz: app.kernel.authz,
+    get: (path, q) => (path.startsWith("/api/v1/sessions/") ? app.getSession(path.split("/").pop()!) : app.get(path, q)),
+    post: (path, body) => app.post(path, body),
+    close: app.close,
+  };
+}
+
+/**
+ * `demo: true` serves the scripted scenario the tests and screenshots are written
+ * against. Otherwise the real app: empty on first boot, persisted under `dataDir`.
+ */
+export async function start(
+  port: number,
+  webRoot: string,
+  opts: { demo?: boolean; dataDir?: string; databaseUrl?: string } = {},
+): Promise<{ close: () => Promise<void> }> {
+  const handler = opts.demo || !opts.dataDir ? await demoHandler() : await appHandler(opts.dataDir, opts.databaseUrl);
 
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
     void (async () => {
       const url = new URL(req.url ?? "/", "http://localhost");
+      const method = req.method ?? "GET";
+      const isApi = url.pathname.startsWith("/api/");
+      const json = (status: number, data: unknown) => {
+        res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify(data, (_k, v) => (typeof v === "bigint" ? String(v) : v)));
+      };
       try {
+        if (method !== "GET" && method !== "POST") throw new HttpError(405, `${method} is not supported`);
+        if (method === "POST" && !isApi) throw new HttpError(405, "POST is only accepted on the API");
+
         // Authorization happens here, once, before any handler. No route reaches its
         // body without a decision having been made and recorded.
-        const needed = capabilityFor(url.pathname);
+        const needed = capabilityFor(url.pathname, method);
+        if (method === "POST" && !needed) throw new HttpError(404, `No such route: POST ${url.pathname}`);
         if (needed) {
-          const decision = demo.kernel.authz.can(subjectFor(req), needed, {
+          const decision = handler.authz.can(subjectFor(req), needed, {
             tenantId: "t1",
             workspaceId: "ws1",
-            projectId: "p1",
+            projectId: url.searchParams.get("project") ?? "p1",
           });
           if (!decision.allowed) {
-            res.writeHead(403, { "content-type": "application/json; charset=utf-8" });
-            res.end(JSON.stringify({ error: "forbidden", capability: needed, reason: decision.reason }));
+            json(403, { error: "forbidden", capability: needed, reason: decision.reason });
             return;
           }
         }
 
-        const data = await routes(demo, url.pathname);
+        const data = method === "POST"
+          ? await handler.post(url.pathname, await readJson(req))
+          : isApi ? await handler.get(url.pathname, url.searchParams) : undefined;
         if (data !== undefined) {
-          const body = JSON.stringify(data, (_k, v) => (typeof v === "bigint" ? String(v) : v));
-          res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-          res.end(body);
+          json(200, data);
           return;
         }
+        if (isApi) throw new HttpError(404, `No such route: ${url.pathname}`);
         const file = url.pathname === "/" ? "index.html" : url.pathname.slice(1);
         const body = await readFile(join(webRoot, file));
         res.writeHead(200, { "content-type": MIME[extname(file)] ?? "application/octet-stream" });
         res.end(body);
       } catch (err) {
-        res.writeHead(url.pathname.startsWith("/api/") ? 500 : 404, {
-          "content-type": "application/json",
-        });
-        res.end(JSON.stringify({ error: String(err) }));
+        if (err instanceof HttpError) return json(err.status, { error: err.message });
+        if (err instanceof KernelError) return json(400, { error: err.message, code: err.code });
+        if (!isApi) return json(404, { error: "not found" });
+        console.error(err);
+        json(500, { error: String(err) });
       }
     })();
   });
@@ -287,7 +375,7 @@ export async function start(port: number, webRoot: string): Promise<{ close: () 
   return {
     close: async () => {
       await new Promise<void>((resolve) => server.close(() => resolve()));
-      await demo.close();
+      await handler.close();
     },
   };
 }

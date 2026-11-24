@@ -11,7 +11,7 @@
   <body>
     <header class="page-head">
       <a class="skip" href="#surface">Skip to content</a>
-      <h1 class="sr-only">Harness Cloud — project acme-platform</h1>
+      <h1 class="sr-only">Harness Cloud</h1>
     </header>
 
     <div id="app" class="shell">
@@ -21,9 +21,7 @@
           <span class="logo" aria-hidden="true"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13V3M13 13V3M3 8h10"/></svg></span>
           <div>
             <div class="rail-title" id="rail-title" translate="no">Harness Cloud</div>
-            <button class="ws-switch" id="ws-switch" aria-haspopup="listbox" aria-expanded="false">
-              Navabrind IT <span aria-hidden="true">▾</span>
-            </button>
+            <div class="ws-switch" id="ws-name"></div>
           </div>
         </div>
 
@@ -44,10 +42,10 @@
 
         <div class="rail-foot">
           <div class="who">
-            <div class="avatar" aria-hidden="true">S</div>
+            <div class="avatar" id="who-avatar" aria-hidden="true"></div>
             <div>
-              <div class="who-name">shone</div>
-              <div class="who-role">admin · Navabrind IT</div>
+              <div class="who-name" id="who-name"></div>
+              <div class="who-role" id="who-role"></div>
             </div>
           </div>
         </div>
@@ -65,6 +63,7 @@
       <!-- RIGHT: project status, not model telemetry -->
       <aside class="status" id="status" tabindex="0" aria-label="Project status"></aside>
     </div>
+    <div class="toast" id="toast" role="alert" hidden></div>
     <script type="module" src="app.js"></script>
   </body>
 </html>

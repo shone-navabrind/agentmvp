@@ -19,7 +19,22 @@ cd agentmvp
 docker compose up -d --build
 ```
 
-Then open **http://localhost:8787**.
+Then open **http://localhost:8787**. The first screen asks you to create a project; nothing
+is pre-filled. Projects, sessions, the board and spend are stored in Postgres (the `db`
+service) and survive restarts. `docker compose down -v` wipes everything.
+
+**Agent replies** need a model credential. Put one in a `.env` file next to
+`compose.yaml` before `up`:
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-...          # or CLAUDE_CODE_OAUTH_TOKEN=... (claude setup-token)
+```
+
+Without one the app works, but the chat box is disabled and says why. Each session runs
+Claude Code on its own git branch of the project's repository (public `https://` repos).
+
+**The old scripted demo** (a fake "acme-platform" company, read-only) is still there for the
+tests and screenshots: `HARNESS_DEMO=1 docker compose up -d`.
 
 Or let the script pick whichever of Docker and Node is available:
 
@@ -48,10 +63,10 @@ npm test        # 267 tests, 13 packages, no external services
 npm start       # http://localhost:8787
 ```
 
-There is one container on purpose. The event log, projections and ledger run on PGlite,
-a real Postgres embedded in the process, so no database service has to start first. When
-the kernel moves to a networked Postgres (see `docs/STATUS.md`), a `db` service joins
-`compose.yaml` and the app gains a `DATABASE_URL`.
+Without `DATABASE_URL`, `npm start` keeps its data in PGlite (an embedded Postgres) under
+`.data/`, so nothing has to be installed. Set `DATABASE_URL=postgres://...` to use a real
+Postgres instead, as the compose file does. The tests use in-memory PGlite; set
+`TEST_DATABASE_URL` to an empty database to run the persistence test against Postgres.
 
 ## Layout
 

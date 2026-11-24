@@ -46,8 +46,13 @@ Honest accounting. Nothing below is stubbed out and claimed as working.
 | **Auth, SSO, sessions (K0)** | Not started | `authz` (the capability layer that sits above it) is complete and table-driven. |
 | **Firecracker / OCI drivers** | Deferred to K13 | The `ComputeDriver` interface and capability negotiation make them additive. |
 
-The web app is a working UI served by the API over real data from every package, but it is
-read-only: buttons render, they do not post. `npm start` boots the whole stack and serves it.
+The web app is a working UI. By default it boots empty and persisted (Postgres via
+`DATABASE_URL`, or PGlite on disk): you create projects, sessions and board tasks, choose a
+blueprint, and chat with a real Claude Code process running in the session's git worktree
+when `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` is set. Not yet driven from the UI:
+starting flows, creating triggers, installing plugins, the terminal, and blueprint
+provisioning (D10). Agents run in the app container itself, not an isolated VM.
+`HARNESS_DEMO=1` serves the original read-only scripted scenario.
 
 ## Bugs the tests and screenshots caught in this code
 

@@ -3,3 +3,5 @@ dist/
 *.log
 .agents/skills/
 .claude/skills/
+.data/
+.env
