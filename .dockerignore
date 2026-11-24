@@ -1,0 +1,10 @@
+node_modules
+**/node_modules
+.git
+.agents
+.claude
+.egm
+docs/screenshots
+*.log
+.DS_Store
+skills-lock.json

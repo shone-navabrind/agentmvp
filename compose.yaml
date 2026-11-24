@@ -1,0 +1,39 @@
+# Harness Cloud — local run.
+#
+#   docker compose up -d --build
+#   open http://localhost:8787
+#
+# One service on purpose. The event log, projections and ledger currently run on
+# PGlite, a real Postgres embedded in the process, so there is no database container
+# to start and nothing to wait for. When the kernel moves to a networked Postgres
+# (see docs/STATUS.md), a `db` service joins here and the app gains a DATABASE_URL.
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: harness-cloud:local
+    container_name: harness-cloud
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8787}:8787"
+    environment:
+      PORT: 8787
+      NODE_ENV: production
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8787/api/v1/project').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 3s
+      start_period: 40s
+      retries: 5
+    # The demo state is rebuilt in memory on every boot, so the container owns no
+    # data worth persisting and is safe to destroy and recreate.
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
