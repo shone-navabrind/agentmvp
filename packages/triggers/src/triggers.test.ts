@@ -19,7 +19,7 @@ async function setup(now = () => 1_700_000_000_000): Promise<{
   close: () => Promise<void>;
 }> {
   const mem = await openMemoryDb();
-  const k = await createKernel(mem.db);
+  const k = await createKernel(mem.db, { ephemeralSecrets: true });
   k.registry.define({ type: "pr.opened", schema: z.object({ number: z.number(), draft: z.boolean() }) });
   k.registry.define({ type: "nightly.started", schema: z.object({ at: z.string() }) });
   const ran: string[] = [];

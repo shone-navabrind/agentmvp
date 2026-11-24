@@ -38,7 +38,12 @@ export type EventInput<P = unknown> = {
   at?: string;
 } & Scope;
 
-/** Minimal SQL surface. A real pg Pool, a pg tx, and PGlite all satisfy this. */
+/**
+ * Minimal SQL surface over **Postgres**. A pg Pool, a pg transaction and PGlite all
+ * satisfy it. It is not a general database abstraction: queries throughout the kernel
+ * use Postgres dialect (jsonb, on conflict, ::text, timestamptz), so swapping to another
+ * engine means rewriting them, not just this driver.
+ */
 export interface Queryable {
   query<T = Record<string, unknown>>(
     sql: string,

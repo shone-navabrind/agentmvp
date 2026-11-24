@@ -12,7 +12,6 @@
   },
   "dependencies": {
     "@harness/kernel": "*",
-    "@harness/flow": "*",
     "zod": "^3.25.76"
   },
   "devDependencies": {

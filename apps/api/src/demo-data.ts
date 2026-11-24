@@ -24,7 +24,7 @@ const USER = { kind: "user" as const, id: "u-shone" };
  */
 export async function buildDemo() {
   const mem = await openMemoryDb();
-  const k: Kernel = await createKernel(mem.db);
+  const k: Kernel = await createKernel(mem.db, { ephemeralSecrets: true });
 
   // ---- events -------------------------------------------------------------
   defineBoardEvents(k.registry);

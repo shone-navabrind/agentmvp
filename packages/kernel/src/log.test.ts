@@ -13,7 +13,7 @@ describe("event log", () => {
   before(async () => {
     const mem = await openMemoryDb();
     close = mem.close;
-    k = await createKernel(mem.db);
+    k = await createKernel(mem.db, { ephemeralSecrets: true });
     defineBoardEvents(k.registry);
   });
   after(() => close());
@@ -157,7 +157,7 @@ describe("event log", () => {
 describe("event log atomicity", () => {
   test("a rolled-back transaction leaves no event and no outbox row", async () => {
     const mem = await openMemoryDb();
-    const k = await createKernel(mem.db);
+    const k = await createKernel(mem.db, { ephemeralSecrets: true });
     defineBoardEvents(k.registry);
     k.log.subscribe({ destination: "webhook:acme", match: "task.*" });
 

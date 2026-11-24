@@ -13,7 +13,7 @@ function hash(v: unknown): string {
 describe("projections", () => {
   test("K1 ACCEPTANCE: replay rebuilds a projection byte-identically", async () => {
     const mem = await openMemoryDb();
-    const k = await createKernel(mem.db);
+    const k = await createKernel(mem.db, { ephemeralSecrets: true });
     defineBoardEvents(k.registry);
 
     // A realistic board history, including one legacy v1 event that must upcast on replay.
@@ -58,7 +58,7 @@ describe("projections", () => {
 
   test("a version bump triggers an automatic rebuild", async () => {
     const mem = await openMemoryDb();
-    const k = await createKernel(mem.db);
+    const k = await createKernel(mem.db, { ephemeralSecrets: true });
     defineBoardEvents(k.registry);
     await k.log.append({
       ...SCOPE,
@@ -78,7 +78,7 @@ describe("projections", () => {
 
   test("catch-up is incremental: a second run applies only new events", async () => {
     const mem = await openMemoryDb();
-    const k = await createKernel(mem.db);
+    const k = await createKernel(mem.db, { ephemeralSecrets: true });
     defineBoardEvents(k.registry);
     const emit = (payload: unknown) =>
       k.log.append({ ...SCOPE, stream: "project:i", type: "task.created", payload, actor: USER });
@@ -94,7 +94,7 @@ describe("projections", () => {
 
   test("a projection crash mid-batch replays the batch rather than skipping it", async () => {
     const mem = await openMemoryDb();
-    const k = await createKernel(mem.db);
+    const k = await createKernel(mem.db, { ephemeralSecrets: true });
     defineBoardEvents(k.registry);
     for (let i = 0; i < 4; i++) {
       await k.log.append({

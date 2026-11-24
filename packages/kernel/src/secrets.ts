@@ -17,6 +17,14 @@ export class LocalMasterKey implements KeyWrapper {
     if (master.length !== 32) throw new Error("master key must be 32 bytes");
     this.#master = master;
   }
+
+  /**
+   * A key that dies with the process. Named so that choosing it is deliberate: every
+   * secret wrapped by it is unreadable once this process exits.
+   */
+  static ephemeral(): LocalMasterKey {
+    return new LocalMasterKey(randomBytes(32));
+  }
   async wrap(dataKey: Buffer): Promise<Buffer> {
     const iv = randomBytes(12);
     const c = createCipheriv("aes-256-gcm", this.#master, iv);

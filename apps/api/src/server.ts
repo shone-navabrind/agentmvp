@@ -3,6 +3,21 @@ import { readFile } from "node:fs/promises";
 import { join, extname } from "node:path";
 import { buildDemo, type Demo } from "./demo-data.ts";
 
+/** Blank out every secret binding value wherever it appears in generated text. */
+function redactSecrets(
+  text: string,
+  bp: { inputs: Array<{ key: string; secret: boolean }> },
+  bindings: { inputs: Record<string, string> },
+): string {
+  let out = text;
+  for (const input of bp.inputs) {
+    if (!input.secret) continue;
+    const value = bindings.inputs[input.key];
+    if (value) out = out.split(value).join("\u2022".repeat(8));
+  }
+  return out;
+}
+
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -151,11 +166,21 @@ async function routes(demo: Demo, path: string): Promise<unknown | undefined> {
         id: b.active.id, name: b.active.name, summary: b.active.summary,
         whatYouGet: b.active.ui.whatYouGet, estimateMinutes: b.active.ui.estimateMinutes,
       },
-      bindings: b.bindings,
+      // An input declared secret is never serialised to a client, and the rendered
+      // compose carries those values inline, so it is redacted the same way.
+      bindings: {
+        ...b.bindings,
+        inputs: Object.fromEntries(
+          Object.entries(b.bindings.inputs).map(([k, v]) => [
+            k,
+            b.active.inputs.find((i) => i.key === k)?.secret ? "" : v,
+          ]),
+        ),
+      },
       ready: b.check.ok,
       missing: b.check.missing,
       previewPort: b.previewPort,
-      compose: b.compose,
+      compose: redactSecrets(b.compose, b.active, b.bindings),
       steps: b.graph.nodes.map((n) => ({ id: n.id, type: n.type, label: b.labels[n.id] })),
     };
   }

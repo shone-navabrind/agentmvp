@@ -11,7 +11,7 @@ const USER = { kind: "user" as const, id: "u1" };
 
 async function setup(): Promise<{ k: Kernel; board: Board; close: () => Promise<void>; sync: () => Promise<void> }> {
   const mem = await openMemoryDb();
-  const k = await createKernel(mem.db);
+  const k = await createKernel(mem.db, { ephemeralSecrets: true });
   defineBoardEvents(k.registry);
   const board = new Board({ db: mem.db, log: k.log, steps: k.steps });
   const sync = async () => {

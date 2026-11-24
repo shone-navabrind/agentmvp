@@ -147,6 +147,29 @@ describe("full stack", () => {
     assert.equal(agent.decisions["project:terminal:open"], false, "an agent gets no terminal");
   });
 
+  test("a value declared secret never reaches a client", async () => {
+    const bp = await get("/api/v1/blueprints");
+    // The real password is in demo-data; neither the bindings nor the rendered
+    // compose may carry it, and the compose embeds env values inline.
+    assert.equal(bp.bindings.inputs.DB_PASSWORD, "", "secret bindings are blanked");
+    assert.ok(!bp.compose.includes("dev-only"), "secret is not baked into the compose");
+    assert.match(bp.compose, /PASSWORD: "\u2022+"/, "it is redacted, not simply absent");
+    assert.equal(bp.bindings.inputs.ODOO_DB_NAME, "acme", "non-secrets still render");
+  });
+
+  test("the blueprint endpoint exposes the catalog and the provisioning plan", async () => {
+    const bp = await get("/api/v1/blueprints");
+    assert.ok(bp.catalog.length >= 3);
+    assert.equal(bp.active.id, "odoo-18-enterprise");
+    assert.equal(bp.ready, true);
+    const ids = bp.steps.map((s: { id: string }) => s.id);
+    assert.ok(ids.includes("acquire") && ids.includes("verify"));
+    for (const s of bp.steps) {
+      assert.ok(s.label, `step ${s.id} has no plain-language label`);
+      assert.ok(!/docker|container|compose/i.test(s.label), `jargon in "${s.label}"`);
+    }
+  });
+
   test("the web app is served and references its assets", async () => {
     const html = await (await fetch(BASE + "/")).text();
     assert.match(html, /<title>Harness Cloud<\/title>/);

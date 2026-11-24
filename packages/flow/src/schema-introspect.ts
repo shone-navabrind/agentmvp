@@ -27,19 +27,19 @@ export function unwrap(s: ZodTypeAny): ZodTypeAny {
   return cur;
 }
 
-export function isPermissive(s: ZodTypeAny): boolean {
+function isPermissive(s: ZodTypeAny): boolean {
   const t = def(unwrap(s)).typeName;
   return t === "ZodAny" || t === "ZodUnknown" || t === "ZodRecord";
 }
 
-export function objectShape(s: ZodTypeAny): Record<string, ZodTypeAny> | null {
+function objectShape(s: ZodTypeAny): Record<string, ZodTypeAny> | null {
   const u = unwrap(s);
   const d = def(u);
   if (d.typeName !== "ZodObject" || !d.shape) return null;
   return d.shape();
 }
 
-export function isOptional(s: ZodTypeAny): boolean {
+function isOptional(s: ZodTypeAny): boolean {
   return (s as unknown as { isOptional?: () => boolean }).isOptional?.() ?? false;
 }
 
@@ -52,10 +52,6 @@ export function requiredKeys(s: ZodType): string[] {
     .map(([k]) => k);
 }
 
-export function knownKeys(s: ZodType): string[] | null {
-  const shape = objectShape(s as ZodTypeAny);
-  return shape ? Object.keys(shape) : null;
-}
 
 /**
  * Does `path` plausibly exist in this schema? Returns null for "cannot tell"

@@ -9,7 +9,7 @@ import { LocalMasterKey, Secrets } from "./secrets.ts";
 
 async function setup() {
   const mem = await openMemoryDb();
-  const k = await createKernel(mem.db);
+  const k = await createKernel(mem.db, { ephemeralSecrets: true });
   defineBoardEvents(k.registry);
   return { mem, k };
 }
@@ -130,6 +130,24 @@ describe("transactional outbox", () => {
   });
 });
 
+describe("secrets: key management", () => {
+  test("createKernel REFUSES to invent a master key", async () => {
+    // A per-boot key silently makes every stored secret unreadable after a restart.
+    // Failing at construction is the only safe default.
+    const mem = await openMemoryDb();
+    await assert.rejects(() => createKernel(mem.db), /NO_KEY_WRAPPER|needs a keyWrapper/);
+    await mem.close();
+  });
+
+  test("an ephemeral key must be asked for by name", async () => {
+    const mem = await openMemoryDb();
+    const k = await createKernel(mem.db, { ephemeralSecrets: true });
+    await k.secrets.put("secret://ws1/x", "t1", "value");
+    assert.equal(await k.secrets.get("secret://ws1/x"), "value");
+    await mem.close();
+  });
+});
+
 describe("secrets", () => {
   test("round-trips a value and stores no plaintext", async () => {
     const mem = await openMemoryDb();
@@ -145,7 +163,7 @@ describe("secrets", () => {
 
   test("each record gets its own data key", async () => {
     const mem = await openMemoryDb();
-    const k = await createKernel(mem.db);
+    const k = await createKernel(mem.db, { ephemeralSecrets: true });
     await k.secrets.put("secret://ws1/a", "t1", "same-value");
     await k.secrets.put("secret://ws1/b", "t1", "same-value");
     const a = await mem.db.query<{ wrapped_key: Uint8Array; ciphertext: Uint8Array }>(
@@ -162,7 +180,7 @@ describe("secrets", () => {
 
   test("a tampered ciphertext fails authentication rather than returning garbage", async () => {
     const mem = await openMemoryDb();
-    const k = await createKernel(mem.db);
+    const k = await createKernel(mem.db, { ephemeralSecrets: true });
     await k.secrets.put("secret://ws1/t", "t1", "original");
     await mem.db.query(`update secrets set ciphertext = $1 where uri = 'secret://ws1/t'`, [
       Buffer.from("tampered-bytes!!"),

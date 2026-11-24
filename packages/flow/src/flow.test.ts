@@ -5,13 +5,13 @@ import { openMemoryDb, createKernel, type Kernel } from "@harness/kernel";
 import { NodeRegistry } from "./registry.ts";
 import { compileGraph } from "./runner.ts";
 import { defineNode, GraphInvalid, type Graph } from "./types.ts";
-import { approvalNode, checkNode, constNode, incrementNode, mapNode, standardNodes } from "./nodes.ts";
+import { agentNode, approvalNode, checkNode, constNode, httpNode, incrementNode, mapNode, standardNodes } from "./nodes.ts";
 
 const SCOPE = { tenantId: "t1", workspaceId: "ws1", projectId: "p1" };
 
 async function kernelWith(graph: Graph, reg: NodeRegistry): Promise<{ k: Kernel; close: () => Promise<void> }> {
   const mem = await openMemoryDb();
-  const k = await createKernel(mem.db);
+  const k = await createKernel(mem.db, { ephemeralSecrets: true });
   k.registry.define({ type: "flow.note", schema: z.object({ text: z.string() }) });
   k.steps.register(compileGraph(graph, reg));
   return { k, close: mem.close };
@@ -416,5 +416,101 @@ describe("human in the loop", () => {
     await k.steps.execute(runId);
     await assert.rejects(() => k.steps.resume(runId, "approval:a", {}), /NOT_PAUSED|not paused/);
     await close();
+  });
+});
+
+describe("http node: the egress allowlist is a real control, not a comment", () => {
+  function ctx() {
+    return {
+      step: async (_k: string, fn: () => Promise<unknown>) => fn(),
+      emit: async () => ({}) as never,
+      budget: { spentUsd: () => 0, charge: () => {}, assertUnder: () => {} },
+      signal: new AbortController().signal,
+      runId: "r",
+      nodeId: "n",
+      iteration: 0,
+    } as never;
+  }
+
+  test("a host on the allowlist is reached", async () => {
+    const seen: string[] = [];
+    const node = httpNode((async (url: string) => {
+      seen.push(String(url));
+      return new Response('{"ok":true}', { status: 200 });
+    }) as unknown as typeof fetch);
+
+    const out = await node.execute(
+      ctx(),
+      { method: "GET", allowHosts: ["api.example.com"] },
+      { url: "https://api.example.com/things" },
+    );
+    assert.deepEqual(out, { status: 200, body: { ok: true } });
+    assert.deepEqual(seen, ["https://api.example.com/things"]);
+  });
+
+  test("a host NOT on the allowlist never leaves the process", async () => {
+    const seen: string[] = [];
+    const node = httpNode((async (url: string) => {
+      seen.push(String(url));
+      return new Response("", { status: 200 });
+    }) as unknown as typeof fetch);
+
+    await assert.rejects(
+      () =>
+        node.execute(
+          ctx(),
+          { method: "POST", allowHosts: ["api.example.com"] },
+          { url: "https://evil.example/exfiltrate" },
+        ),
+      /host "evil.example" is not in this node's egress allowlist/,
+    );
+    assert.deepEqual(seen, [], "the request was never issued");
+  });
+
+  test("an empty allowlist is open, so a blueprint must set one deliberately", async () => {
+    const node = httpNode((async () => new Response("hi", { status: 200 })) as unknown as typeof fetch);
+    const out = await node.execute(ctx(), { method: "GET", allowHosts: [] }, { url: "https://anywhere.example/" });
+    assert.equal((out as { status: number }).status, 200);
+  });
+
+  test("it is marked non-idempotent, so an interrupted POST is never replayed", () => {
+    assert.equal(httpNode().idempotent, false);
+  });
+
+  test("a non-JSON body comes back as text rather than throwing", async () => {
+    const node = httpNode((async () => new Response("plain text", { status: 503 })) as unknown as typeof fetch);
+    const out = await node.execute(ctx(), { method: "GET", allowHosts: [] }, { url: "https://x.example/" });
+    assert.deepEqual(out, { status: 503, body: "plain text" });
+  });
+});
+
+describe("agent node", () => {
+  test("charges the run budget and halts at the node's own cost cap", async () => {
+    let spent = 0;
+    const ctx = {
+      step: async (_k: string, fn: () => Promise<unknown>) => fn(),
+      emit: async () => ({}) as never,
+      budget: {
+        spentUsd: () => spent,
+        charge: (u: number) => { spent += u; },
+        assertUnder: (lim: number) => {
+          if (spent >= lim) throw new Error(`BUDGET_EXCEEDED ${spent} >= ${lim}`);
+        },
+      },
+      signal: new AbortController().signal,
+      runId: "r", nodeId: "n", iteration: 0,
+    } as never;
+
+    const node = agentNode(async (prompt) => ({ text: `re: ${prompt}`, costUsd: 0.4 }));
+
+    const ok = await node.execute(ctx, { model: "m", costCapUsd: 1 }, { prompt: "hello" });
+    assert.deepEqual(ok, { text: "re: hello", costUsd: 0.4 });
+    assert.equal(spent, 0.4, "the turn's cost reached the run budget");
+
+    await node.execute(ctx, { model: "m", costCapUsd: 1 }, { prompt: "again" });
+    await assert.rejects(
+      () => node.execute(ctx, { model: "m", costCapUsd: 1 }, { prompt: "third" }),
+      /BUDGET_EXCEEDED/,
+    );
   });
 });

