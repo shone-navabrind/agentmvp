@@ -7,6 +7,7 @@ import { Ledger, BudgetEnforcer, type GatewayAdmin, type GatewayKey } from "@har
 import { TriggerEngine } from "@harness/triggers";
 import { compileGraph, standardNodes, defineNode, type Graph } from "@harness/flow";
 import { PluginHost, parseManifest } from "@harness/plugins";
+import { CATALOG, compileProvisioning, checkBindings, friendlyStepLabels, renderCompose, primaryPort, findBlueprint } from "@harness/blueprints";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -277,9 +278,30 @@ export async function buildDemo() {
       .catch(() => undefined);
   }
 
+  // ---- blueprints ---------------------------------------------------------
+  const activeBlueprint = findBlueprint("odoo-18-enterprise")!;
+  const activeBindings = {
+    inputs: { DB_PASSWORD: "dev-only", ODOO_DB_NAME: "acme" },
+    seeds: { devdb: "artifact://uploads/acme-2026-11-18.sql", filestore: null },
+    repos: { addons: ["acme-addons"], enterprise: ["acme-enterprise"] },
+  };
+  const provisionGraph = compileProvisioning(activeBlueprint, activeBindings);
+  const provisionLabels = friendlyStepLabels(activeBlueprint);
+  const composeYaml = renderCompose(activeBlueprint, activeBindings, { portBase: 40000 });
+
   await sync();
 
   return {
+    blueprints: {
+      catalog: CATALOG,
+      active: activeBlueprint,
+      bindings: activeBindings,
+      graph: provisionGraph,
+      labels: provisionLabels,
+      compose: composeYaml,
+      previewPort: primaryPort(activeBlueprint, 40000),
+      check: checkBindings(activeBlueprint, activeBindings),
+    },
     kernel: k,
     db: mem.db,
     board,

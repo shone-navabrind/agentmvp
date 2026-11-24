@@ -134,6 +134,32 @@ async function routes(demo: Demo, path: string): Promise<unknown | undefined> {
     }));
   }
 
+  if (path === "/api/v1/blueprints") {
+    const b = demo.blueprints;
+    return {
+      catalog: b.catalog.map((x) => ({
+        id: x.id, name: x.name, summary: x.summary, tags: x.tags, origin: x.origin,
+        services: x.services.length, estimateMinutes: x.ui.estimateMinutes,
+        whatYouGet: x.ui.whatYouGet,
+        needs: {
+          repos: x.repos.map((r) => ({ id: r.id, label: r.label, required: r.required, hint: r.hint })),
+          seeds: x.seeds.map((s) => ({ id: s.id, label: s.label, required: s.required, hint: s.hint, scrubs: s.neutralize.recipes })),
+          inputs: x.inputs.map((i) => ({ key: i.key, label: i.label, required: i.required, secret: i.secret, hint: i.hint })),
+        },
+      })),
+      active: {
+        id: b.active.id, name: b.active.name, summary: b.active.summary,
+        whatYouGet: b.active.ui.whatYouGet, estimateMinutes: b.active.ui.estimateMinutes,
+      },
+      bindings: b.bindings,
+      ready: b.check.ok,
+      missing: b.check.missing,
+      previewPort: b.previewPort,
+      compose: b.compose,
+      steps: b.graph.nodes.map((n) => ({ id: n.id, type: n.type, label: b.labels[n.id] })),
+    };
+  }
+
   if (path === "/api/v1/scope") return scope;
   return undefined;
 }

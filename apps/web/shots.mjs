@@ -9,14 +9,15 @@ const OUT = process.argv[2] ?? "screenshots";
 const BASE = process.env.BASE ?? "http://localhost:8787";
 
 const TABS = [
-  ["chat", "01-session-chat"],
-  ["board", "02-board"],
-  ["flows", "03-flows"],
-  ["triggers", "04-triggers"],
-  ["repos", "05-repos-worktrees"],
-  ["terminal", "06-terminal"],
-  ["plugins", "07-plugins"],
-  ["billing", "08-credits"],
+  ["setup", "01-setup-blueprint"],
+  ["chat", "02-session-chat"],
+  ["board", "03-board"],
+  ["flows", "04-flows"],
+  ["triggers", "05-triggers"],
+  ["repos", "06-repos"],
+  ["terminal", "07-terminal"],
+  ["plugins", "08-plugins"],
+  ["billing", "09-credits"],
 ];
 
 await mkdir(OUT, { recursive: true });
@@ -32,7 +33,7 @@ page.on("console", (m) => {
 });
 page.on("pageerror", (e) => console.error("  page exception:", e.message));
 
-await page.goto(BASE, { waitUntil: "networkidle" });
+await page.goto(BASE + "?role=operator", { waitUntil: "networkidle" });
 await page.waitForSelector("#session-list [data-session]", { timeout: 10_000 });
 
 for (const [tab, name] of TABS) {
@@ -42,18 +43,21 @@ for (const [tab, name] of TABS) {
   console.log(`  ${name}.png`);
 }
 
-// A second session selected, to show the rail switching and per-session status.
-await page.click('#session-list [data-session="s-perf"]');
-await page.waitForTimeout(300);
-await page.screenshot({ path: `${OUT}/09-second-session.png` });
-console.log("  09-second-session.png");
+// Guided role: the same app, far less machinery on screen.
+for (const [tab, name] of [["setup", "10-guided-setup"], ["chat", "11-guided-chat"], ["board", "12-guided-board"]]) {
+  await page.goto(`${BASE}?role=guided&tab=${tab}`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/${name}.png` });
+  console.log(`  ${name}.png`);
+}
+await page.goto(BASE + "?role=operator&tab=board", { waitUntil: "networkidle" });
+await page.waitForTimeout(250);
 
 // Phone width: the rails collapse out of the way rather than overflowing.
 await page.setViewportSize({ width: 430, height: 900 });
-await page.click('.tab[data-tab="board"]');
 await page.waitForTimeout(250);
-await page.screenshot({ path: `${OUT}/10-narrow.png` });
-console.log("  10-narrow.png");
+await page.screenshot({ path: `${OUT}/13-narrow.png` });
+console.log("  13-narrow.png");
 
 await browser.close();
 console.log(`\n${TABS.length + 2} screenshots written to ${OUT}/`);

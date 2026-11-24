@@ -1,0 +1,409 @@
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Harness Cloud Anatomy</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: a single reading column with full-bleed figure bands and a sticky section index. */
+  :root {
+    --bg: #0c0d0f;
+    --bg-2: #141518;
+    --bg-3: #1b1d21;
+    --fg: #ecedef;
+    --fg-2: #a6acb4;
+    --fg-3: #8b9199;
+    --line: #26292e;
+    --accent: #e0825f;
+    --ok: #5fab80;
+    --warn: #cfa94a;
+    --display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+    --body: "Inter", ui-sans-serif, -apple-system, system-ui, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+    color-scheme: dark;
+  }
+  :root:not([data-theme="dark"]) { }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #fbfaf9; --bg-2: #ffffff; --bg-3: #f2f0ee;
+      --fg: #16181b; --fg-2: #4d545c; --fg-3: #6b727a;
+      --line: #e2dfdb; --accent: #b9552f; --ok: #2f7850; --warn: #8a6a14;
+      color-scheme: light;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #fbfaf9; --bg-2: #ffffff; --bg-3: #f2f0ee;
+    --fg: #16181b; --fg-2: #4d545c; --fg-3: #6b727a;
+    --line: #e2dfdb; --accent: #b9552f; --ok: #2f7850; --warn: #8a6a14;
+    color-scheme: light;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 400 16px/1.65 var(--body);
+    -webkit-font-smoothing: antialiased;
+  }
+  .page {
+    max-width: 112ch; margin: 0 auto;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 0 96px;
+  }
+  .lede { max-width: 68ch; }
+
+  header.hero {
+    margin-top: calc(-1 * env(safe-area-inset-top, 0px));
+    padding-top: calc(env(safe-area-inset-top, 0px) + 72px);
+    padding-bottom: 56px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 56px;
+  }
+  .eyebrow {
+    font: 500 11px/1 var(--mono); letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--accent); margin-bottom: 20px;
+  }
+  h1 {
+    font: 700 clamp(34px, 6vw, 54px)/1.05 var(--display);
+    letter-spacing: -0.03em; margin: 0 0 20px; text-wrap: balance; max-width: 20ch;
+  }
+  .sub { font-size: 18px; color: var(--fg-2); max-width: 62ch; margin: 0; }
+
+  h2 {
+    font: 600 clamp(22px, 3vw, 28px)/1.2 var(--display);
+    letter-spacing: -0.02em; margin: 72px 0 16px; text-wrap: balance;
+  }
+  h3 {
+    font: 600 17px/1.3 var(--display); letter-spacing: -0.015em;
+    margin: 36px 0 10px; text-wrap: balance;
+  }
+  p { margin: 0 0 16px; max-width: 68ch; }
+  p.note { color: var(--fg-2); font-size: 15px; }
+  a { color: var(--accent); text-underline-offset: 3px; }
+  code {
+    font: 500 0.88em var(--mono); background: var(--bg-3);
+    padding: 1.5px 5px; border-radius: 4px;
+  }
+  strong { font-weight: 600; }
+
+  figure { margin: 32px 0 40px; }
+  .fig-scroll { overflow-x: auto; background: var(--bg-2); border: 1px solid var(--line); border-radius: 14px; padding: 28px 24px; }
+  figure svg { display: block; max-width: 100%; height: auto; min-width: 640px; margin: 0 auto; color: var(--fg); }
+  figcaption { margin-top: 14px; font-size: 14px; color: var(--fg-3); max-width: 70ch; }
+
+  .svg-box { fill: var(--bg-3); stroke: var(--line); }
+  .svg-box-key { fill: none; stroke: var(--accent); stroke-width: 1.6; }
+  .svg-lane { fill: none; stroke: var(--line); stroke-dasharray: 3 4; }
+  .svg-t { font: 500 12.5px var(--body); fill: var(--fg); }
+  .svg-t-sm { font: 400 11px var(--body); fill: var(--fg-3); }
+  .svg-t-mono { font: 400 11px var(--mono); fill: var(--fg-2); }
+  .svg-lbl { font: 500 10.5px var(--mono); fill: var(--fg-3); letter-spacing: 0.08em; }
+  .svg-edge { stroke: var(--fg-3); stroke-width: 1.3; fill: none; }
+  .svg-edge-key { stroke: var(--accent); stroke-width: 1.8; fill: none; }
+
+  .grid { display: grid; gap: 14px; margin: 24px 0 8px; }
+  @media (min-width: 720px) { .grid.c2 { grid-template-columns: 1fr 1fr; } .grid.c3 { grid-template-columns: repeat(3, 1fr); } }
+  .card {
+    background: var(--bg-2); border: 1px solid var(--line);
+    border-radius: 12px; padding: 18px 20px; min-width: 0;
+  }
+  .card h4 { font: 600 15px/1.3 var(--display); margin: 0 0 6px; }
+  .card p { font-size: 14.5px; color: var(--fg-2); margin: 0; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; margin: 20px 0; }
+  .t-scroll { overflow-x: auto; }
+  th {
+    text-align: left; font: 600 11px var(--mono); letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--fg-3); padding: 0 14px 10px 0; border-bottom: 1px solid var(--line); white-space: nowrap;
+  }
+  td { padding: 11px 14px 11px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  td.mono, .num { font: 400 13px var(--mono); font-variant-numeric: tabular-nums; }
+
+  .pill {
+    display: inline-block; font: 500 11px var(--mono); padding: 2px 8px; border-radius: 99px;
+    background: var(--bg-3); color: var(--fg-2);
+  }
+  .pill.ok { color: var(--ok); }
+  .pill.warn { color: var(--warn); }
+
+  ul.ticks { list-style: none; padding: 0; margin: 16px 0; display: grid; gap: 9px; max-width: 68ch; }
+  ul.ticks li { display: flex; gap: 11px; align-items: flex-start; font-size: 15px; }
+  ul.ticks svg { flex: none; margin-top: 4px; color: var(--ok); }
+
+  pre {
+    background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px;
+    padding: 18px 20px; overflow-x: auto; font: 400 12.5px/1.75 var(--mono);
+    color: var(--fg-2); margin: 20px 0;
+  }
+  pre .c { color: var(--fg-3); }
+  pre .k { color: var(--accent); }
+
+  footer { margin-top: 80px; padding-top: 28px; border-top: 1px solid var(--line); color: var(--fg-3); font-size: 14px; }
+</style>
+
+<div class="page">
+  <header class="hero">
+    <div class="eyebrow">System anatomy</div>
+    <h1>Harness Cloud</h1>
+    <p class="sub">A workspace holds many projects. Each project owns one small virtual machine. Many agent
+      sessions work inside it at once, on their own branches, without stepping on each other.</p>
+  </header>
+
+  <p class="lede">Most of this document is two pictures. The first shows what the system is made of and which
+    way the arrows point. The second shows the one mechanism that is easy to get wrong: how a described stack
+    and a curated one end up in the same place.</p>
+
+  <h2>What it is made of</h2>
+  <p>Three bands. Everything above the dashed line runs on servers you control. Everything below it runs in a
+    machine that belongs to one project and can be thrown away.</p>
+
+  <figure>
+    <div class="fig-scroll">
+      <svg viewBox="0 0 860 486" role="img" aria-label="Three bands. The control plane holds the web app, API, workers and preview proxy. Beneath it the kernel holds the event log, step runtime, authz and secrets, and everything in the control plane writes to the event log. Below a trust boundary, each project sandbox runs sandboxd, a harness adapter and Docker services; sandboxd dials out to the control plane over an outbound mTLS WebSocket, and the harness reaches models only through the LLM gateway.">
+        <defs>
+          <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0 0L10 5L0 10z" fill="currentColor"/>
+          </marker>
+          <marker id="ak" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0 0L10 5L0 10z" fill="#e0825f"/>
+          </marker>
+        </defs>
+
+        <text class="svg-lbl" x="14" y="20">CONTROL PLANE</text>
+        <rect class="svg-box" x="14" y="30" width="190" height="52" rx="9"/>
+        <text class="svg-t" x="30" y="52">Web app</text>
+        <text class="svg-t-sm" x="30" y="69">one shell, role-filtered</text>
+
+        <rect class="svg-box" x="218" y="30" width="178" height="52" rx="9"/>
+        <text class="svg-t" x="234" y="52">API · MCP</text>
+        <text class="svg-t-sm" x="234" y="69">same action layer</text>
+
+        <rect class="svg-box" x="410" y="30" width="178" height="52" rx="9"/>
+        <text class="svg-t" x="426" y="52">Workers</text>
+        <text class="svg-t-sm" x="426" y="69">provision · sync · reap</text>
+
+        <rect class="svg-box" x="602" y="30" width="244" height="52" rx="9"/>
+        <text class="svg-t" x="618" y="52">Preview proxy</text>
+        <text class="svg-t-sm" x="618" y="69">separate domain, scoped cookie</text>
+
+        <text class="svg-lbl" x="14" y="124">KERNEL &#8212; FIXED, NOT PLUGGABLE</text>
+        <rect class="svg-box-key" x="14" y="134" width="832" height="74" rx="11"/>
+        <rect class="svg-box" x="32" y="152" width="188" height="40" rx="8"/>
+        <text class="svg-t" x="48" y="177">Event log</text>
+        <rect class="svg-box" x="236" y="152" width="188" height="40" rx="8"/>
+        <text class="svg-t" x="252" y="177">Step runtime</text>
+        <rect class="svg-box" x="440" y="152" width="188" height="40" rx="8"/>
+        <text class="svg-t" x="456" y="177">Authz</text>
+        <rect class="svg-box" x="644" y="152" width="184" height="40" rx="8"/>
+        <text class="svg-t" x="660" y="177">Secrets</text>
+
+        <path class="svg-edge-key" d="M109 82 L109 128" marker-end="url(#ak)"/>
+        <path class="svg-edge-key" d="M307 82 L307 128" marker-end="url(#ak)"/>
+        <path class="svg-edge-key" d="M499 82 L499 128" marker-end="url(#ak)"/>
+        <text class="svg-t-mono" x="516" y="110" fill="#e0825f">every change is an event</text>
+
+        <rect class="svg-box" x="14" y="228" width="300" height="48" rx="9"/>
+        <text class="svg-t" x="30" y="249">LLM gateway</text>
+        <text class="svg-t-sm" x="30" y="266">one virtual key per project, budget-capped</text>
+
+        <rect class="svg-box" x="330" y="228" width="246" height="48" rx="9"/>
+        <text class="svg-t" x="346" y="249">Blueprint catalog</text>
+        <text class="svg-t-sm" x="346" y="266">curated and saved environments</text>
+
+        <rect class="svg-box" x="592" y="228" width="254" height="48" rx="9"/>
+        <text class="svg-t" x="608" y="249">Postgres</text>
+        <text class="svg-t-sm" x="608" y="266">log, projections, ledger</text>
+
+        <line class="svg-lane" x1="14" y1="306" x2="846" y2="306"/>
+        <text class="svg-lbl" x="14" y="298">TRUST BOUNDARY &#8212; THE VM IS THE SECURITY EDGE</text>
+
+        <text class="svg-lbl" x="14" y="334">PROJECT SANDBOX (ONE PER PROJECT)</text>
+        <rect class="svg-box-key" x="14" y="344" width="832" height="128" rx="11"/>
+
+        <rect class="svg-box" x="32" y="362" width="196" height="46" rx="8"/>
+        <text class="svg-t" x="48" y="383">sandboxd</text>
+        <text class="svg-t-sm" x="48" y="399">dials out, never listens</text>
+
+        <rect class="svg-box" x="244" y="362" width="208" height="46" rx="8"/>
+        <text class="svg-t" x="260" y="383">Harness adapter</text>
+        <text class="svg-t-sm" x="260" y="399">pi · claude-code</text>
+
+        <rect class="svg-box" x="468" y="362" width="360" height="46" rx="8"/>
+        <text class="svg-t" x="484" y="383">Docker services from the blueprint</text>
+        <text class="svg-t-sm" x="484" y="399">odoo · postgres · nginx &#8230;</text>
+
+        <rect class="svg-box" x="32" y="420" width="796" height="36" rx="8"/>
+        <text class="svg-t-sm" x="48" y="443">/srv/git &#8212; one bare clone per repo &#160;&#183;&#160; /work/&lt;session&gt; &#8212; one worktree and one cgroup per session</text>
+
+        <path class="svg-edge-key" d="M130 362 L130 312" marker-end="url(#ak)"/>
+        <text class="svg-t-mono" x="142" y="334" fill="#e0825f">outbound mTLS WebSocket</text>
+
+        <path class="svg-edge" d="M348 362 L348 320 L164 320 L164 282" marker-end="url(#a)"/>
+        <text class="svg-t-mono" x="356" y="352">model calls</text>
+
+        <text class="svg-t-sm" x="484" y="430" opacity="0">spacer</text>
+      </svg>
+    </div>
+    <figcaption>Nothing reaches into a sandbox. sandboxd opens one outbound connection and everything —
+      chat, files, ports, the terminal — rides it, which is why a managed VM and a customer's own server
+      behave identically. The harness never holds a provider key; it calls the gateway with a project
+      key that is scoped, capped and revocable.</figcaption>
+  </figure>
+
+  <h2>Two ways in, one pipeline</h2>
+  <p>A customer either picks a ready-made environment or describes one. The tempting mistake is to build a
+    second code path for the described case. This design refuses that: synthesis emits the same artifact the
+    catalog holds, so an unanticipated stack is exactly as debuggable as a curated one.</p>
+
+  <figure>
+    <div class="fig-scroll">
+      <svg viewBox="0 0 860 330" role="img" aria-label="Two inputs converge. Picking from the catalog and describing a stack in a sentence both produce a Blueprint. The described path passes through a model and a bounded repair loop. Both then pass through one validator, one compiler, and one durable provisioning graph of acquire, repos, compose, seed, setup, start, verify and bundles.">
+        <defs>
+          <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0 0L10 5L0 10z" fill="currentColor"/>
+          </marker>
+          <marker id="bk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0 0L10 5L0 10z" fill="#e0825f"/>
+          </marker>
+        </defs>
+
+        <rect class="svg-box" x="14" y="20" width="200" height="48" rx="9"/>
+        <text class="svg-t" x="30" y="41">Pick from the catalog</text>
+        <text class="svg-t-sm" x="30" y="58">odoo-18-enterprise &#8230;</text>
+
+        <rect class="svg-box" x="14" y="104" width="200" height="48" rx="9"/>
+        <text class="svg-t" x="30" y="125">Describe a stack</text>
+        <text class="svg-t-sm" x="30" y="142">&#8220;Django 5 with Postgres&#8221;</text>
+
+        <rect class="svg-box" x="248" y="104" width="150" height="48" rx="9"/>
+        <text class="svg-t" x="264" y="125">Model</text>
+        <text class="svg-t-sm" x="264" y="142">emits JSON</text>
+
+        <path class="svg-edge" d="M214 128 L244 128" marker-end="url(#b)"/>
+
+        <rect class="svg-box-key" x="446" y="62" width="150" height="48" rx="9"/>
+        <text class="svg-t" x="462" y="83">Validator</text>
+        <text class="svg-t-sm" x="462" y="100">one, for both</text>
+
+        <path class="svg-edge" d="M214 44 L330 44 L330 80 L442 80" marker-end="url(#b)"/>
+        <path class="svg-edge" d="M398 128 L420 128 L420 94 L442 94" marker-end="url(#b)"/>
+
+        <path class="svg-edge-key" d="M520 110 L520 180 L300 180 L300 156" marker-end="url(#bk)"/>
+        <text class="svg-t-mono" x="312" y="174" fill="#e0825f">problems fed back, bounded</text>
+
+        <rect class="svg-box" x="630" y="62" width="216" height="48" rx="9"/>
+        <text class="svg-t" x="646" y="83">Compiler</text>
+        <text class="svg-t-sm" x="646" y="100">blueprint &#8594; flow graph</text>
+
+        <path class="svg-edge" d="M596 86 L626 86" marker-end="url(#b)"/>
+
+        <text class="svg-lbl" x="14" y="228">ONE DURABLE PROVISIONING GRAPH &#8212; EVERY STEP MEMOISED AND RESUMABLE</text>
+        <rect class="svg-box-key" x="14" y="240" width="832" height="66" rx="11"/>
+
+        <rect class="svg-box" x="30" y="258" width="92" height="32" rx="7"/>
+        <text class="svg-t-mono" x="46" y="278">acquire</text>
+        <rect class="svg-box" x="132" y="258" width="82" height="32" rx="7"/>
+        <text class="svg-t-mono" x="148" y="278">repos</text>
+        <rect class="svg-box" x="224" y="258" width="98" height="32" rx="7"/>
+        <text class="svg-t-mono" x="240" y="278">compose</text>
+        <rect class="svg-box" x="332" y="258" width="78" height="32" rx="7"/>
+        <text class="svg-t-mono" x="348" y="278">seed</text>
+        <rect class="svg-box" x="420" y="258" width="82" height="32" rx="7"/>
+        <text class="svg-t-mono" x="436" y="278">setup</text>
+        <rect class="svg-box" x="512" y="258" width="76" height="32" rx="7"/>
+        <text class="svg-t-mono" x="528" y="278">start</text>
+        <rect class="svg-box" x="598" y="258" width="86" height="32" rx="7"/>
+        <text class="svg-t-mono" x="614" y="278">verify</text>
+        <rect class="svg-box" x="694" y="258" width="104" height="32" rx="7"/>
+        <text class="svg-t-mono" x="710" y="278">bundles</text>
+
+        <path class="svg-edge" d="M738 110 L738 236" marker-end="url(#b)"/>
+      </svg>
+    </div>
+    <figcaption>The validator rejects what a model reliably gets wrong: a database dump aimed at a web server,
+      a MySQL dump aimed at Postgres, an unresolvable reference, a dependency cycle, two services on one port,
+      no port marked for the preview, no check proving the stack serves. Problems go back to the model verbatim
+      and usually fix in one round. It caught a real mistake in the hand-written Odoo blueprint.</figcaption>
+  </figure>
+
+  <h3>What a blueprint declares</h3>
+  <pre><span class="c"># odoo-18-enterprise, abbreviated</span>
+<span class="k">sandbox</span>   4 vCPU · 8 GiB · needsDocker · minIsolation: vm
+<span class="k">services</span>  db (postgres:16, healthcheck) → odoo (odoo:18, :8069 primary)
+<span class="k">repos</span>     addons → /workspace/addons      <span class="c">(required)</span>
+          enterprise → /workspace/enterprise
+<span class="k">seeds</span>     devdb (postgres) → db, scrub: partners, mail, cron
+          filestore (files) → odoo
+<span class="k">inputs</span>    DB_PASSWORD (secret) · ODOO_DB_NAME
+<span class="k">setup</span>     write-conf · module-list        <span class="c">(idempotent, re-runnable)</span>
+<span class="k">verify</span>    db-up · web-up · addons-mounted
+<span class="k">bundles</span>   skills the assistant loads, plus stack instructions</pre>
+
+  <h2>Uploaded data is scrubbed before the assistant sees it</h2>
+  <p>A production dump carries real people. An Odoo database restored as-is will email real customers the
+    moment its scheduled jobs wake up. Neutralisation is on by default and runs inside the restore step, not
+    as a thing someone remembers to do afterwards.</p>
+  <ul class="ticks">
+    <li><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.4 6.3 11.6 13 4.8"/></svg><span>Contact details replaced, not deleted, so the shape of the data survives.</span></li>
+    <li><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.4 6.3 11.6 13 4.8"/></svg><span>Outgoing mail servers disabled.</span></li>
+    <li><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.4 6.3 11.6 13 4.8"/></svg><span>Scheduled jobs switched off.</span></li>
+    <li><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.4 6.3 11.6 13 4.8"/></svg><span>For WordPress, the site address is repointed at the private preview.</span></li>
+  </ul>
+
+  <h2>One interface, three amounts of machinery</h2>
+  <p>There is no separate simple app. The same shell, the same API and the same capabilities serve everyone;
+    the role decides how much is on screen and what it is called. Someone who never wants to see a branch name
+    never sees one, and nothing is taken away from them.</p>
+
+  <div class="t-scroll">
+    <table>
+      <thead><tr><th>Role</th><th>Sees</th><th>A session is called</th><th>Status reads</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Guided</strong></td><td class="mono">Get started · Work · Tasks</td><td>a task</td><td class="mono">Working now · Paused</td></tr>
+        <tr><td><strong>Builder</strong></td><td class="mono">+ Repos · Flows</td><td>a session</td><td class="mono">session/s-auth · :40000</td></tr>
+        <tr><td><strong>Operator</strong></td><td class="mono">+ Triggers · Terminal · Plugins · Credits</td><td>a session</td><td class="mono">active · 512 MiB cap</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>Why many sessions share one machine</h2>
+  <p>A VM per session is too expensive and too slow. A shared directory is a corruption bug waiting to happen.
+    The answer is one bare clone per repository and a git worktree per session: three agents can edit the same
+    file at the same time, each on its own branch, and <code>git diff</code> answers what each one changed.</p>
+  <div class="grid c3">
+    <div class="card"><h4>Filesystem</h4><p>One worktree per session, one branch each. Promotion to main is always explicit.</p></div>
+    <div class="card"><h4>CPU and memory</h4><p>A systemd scope per session. A runaway build starves itself, not its neighbours.</p></div>
+    <div class="card"><h4>Ports</h4><p>A disjoint block per session, so two dev servers can both want 5173.</p></div>
+  </div>
+  <p class="note">Admission control caps concurrency at whichever of memory or CPU binds first and queues
+    beyond it, visibly. The prototype's agents were OOM-killed because nothing refused the extra work.</p>
+
+  <h2>Where it stands</h2>
+  <p>Built and tested, with no external services in the test suite — Postgres runs in-process.</p>
+  <div class="t-scroll">
+    <table>
+      <thead><tr><th>Package</th><th>What it does</th><th class="num">Tests</th><th>State</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">kernel</td><td>Event log, projections, durable step runtime, authz, secrets, outbox</td><td class="num">60</td><td><span class="pill ok">done</span></td></tr>
+        <tr><td class="mono">blueprints</td><td>Schema, validator, compiler, catalog, synthesis</td><td class="num">36</td><td><span class="pill ok">done</span></td></tr>
+        <tr><td class="mono">harness</td><td>Normalized events, Claude Code adapter</td><td class="num">24</td><td><span class="pill ok">done</span></td></tr>
+        <tr><td class="mono">compute</td><td>Drivers, host splitting, capability negotiation, warm pool</td><td class="num">20</td><td><span class="pill warn">Incus argv only</span></td></tr>
+        <tr><td class="mono">flow</td><td>Typed-edge graph runtime, guards, human-in-the-loop</td><td class="num">19</td><td><span class="pill ok">done</span></td></tr>
+        <tr><td class="mono">plugins</td><td>Manifests, capability enforcement, circuit breaker</td><td class="num">18</td><td><span class="pill ok">done</span></td></tr>
+        <tr><td class="mono">triggers</td><td>Event, cron, webhook, repo sources</td><td class="num">16</td><td><span class="pill ok">done</span></td></tr>
+        <tr><td class="mono">sandbox</td><td>Worktrees, cgroups, ports, admission control</td><td class="num">13</td><td><span class="pill warn">no daemon yet</span></td></tr>
+        <tr><td class="mono">billing</td><td>Append-only ledger, budget enforcement</td><td class="num">12</td><td><span class="pill ok">done</span></td></tr>
+        <tr><td class="mono">api</td><td>Full-stack integration and the accessibility gate</td><td class="num">12</td><td><span class="pill ok">done</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Not built, and why</h3>
+  <p class="note">Real Incus VMs need KVM, which the build container does not have, so the driver is written in
+    full and only its command construction is tested. sandboxd needs a real VM to live in. The LiteLLM gateway
+    and the pi harness need provider keys and installed CLIs. Authentication and SSO are not started; the
+    capability layer above them is complete and table-driven.</p>
+
+  <footer>
+    Every number on this page comes from the test suite, not from an estimate. The accessibility gate runs
+    axe-core against the rendered DOM of all nine views at WCAG 2.1 AA and fails the build on any violation.
+  </footer>
+</div>

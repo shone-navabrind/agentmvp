@@ -91,7 +91,7 @@ const odoo: unknown = {
         // happily email real customers the moment the instance boots.
         recipes: ["odoo-scrub-partners", "odoo-disable-mail", "odoo-disable-cron"],
       },
-      hint: "A pg_dump of your Odoo database. We scrub contact details and switch off outgoing mail and scheduled jobs before the assistant touches it.",
+      hint: "A copy of your Odoo database. We remove contact details and switch off outgoing mail and scheduled jobs before the assistant touches it.",
     },
     {
       id: "filestore",
@@ -251,7 +251,7 @@ const wordpress: unknown = {
         enabled: true,
         recipes: ["wp-scrub-users", "wp-rewrite-siteurl", "wp-disable-mail"],
       },
-      hint: "An export of your live site's database. We replace user emails, point the site URL at your preview, and stop it sending mail.",
+      hint: "An export of your live site. We replace real email addresses, point the address at your private copy, and stop it sending mail.",
     },
   ],
 
@@ -336,7 +336,7 @@ const nodePg: unknown = {
       required: false,
       accepts: [".sql", ".dump"],
       neutralize: { enabled: true, recipes: ["generic-scrub-emails"] },
-      hint: "Optional. A dump to start from.",
+      hint: "Optional. An existing copy of your data to start from.",
     },
   ],
   inputs: [{ key: "DB_PASSWORD", label: "Database password", required: true, secret: true, default: "app-dev", hint: "Only used inside your private machine." }],

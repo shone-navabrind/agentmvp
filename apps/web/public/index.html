@@ -18,9 +18,9 @@
       <!-- LEFT: workspace -> projects -> sessions. Sessions are durable objects. -->
       <nav class="rail" id="rail" aria-label="Workspace">
         <div class="rail-head">
-          <div class="logo" aria-hidden="true">HC</div>
+          <span class="logo" aria-hidden="true"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13V3M13 13V3M3 8h10"/></svg></span>
           <div>
-            <div class="rail-title" translate="no">Harness Cloud</div>
+            <div class="rail-title" id="rail-title" translate="no">Harness Cloud</div>
             <button class="ws-switch" id="ws-switch" aria-haspopup="listbox" aria-expanded="false">
               Navabrind IT <span aria-hidden="true">▾</span>
             </button>
@@ -31,7 +31,8 @@
         <ul class="project-list" id="project-list" aria-labelledby="projects-head"></ul>
 
         <h2 class="rail-section" id="sessions-head">
-          Sessions <span class="capacity" id="capacity"></span>
+          <span id="sessions-head-text">Sessions</span>
+          <span class="capacity" id="capacity"></span>
         </h2>
         <ul class="session-list" id="session-list" aria-labelledby="sessions-head"></ul>
 
@@ -48,7 +49,10 @@
 
       <!-- CENTER: one surface at a time, per project -->
       <main class="main">
-        <div class="tabs" id="tabs" role="tablist" aria-label="Project views"></div>
+        <div class="tabbar">
+          <div class="tabs" id="tabs" role="tablist" aria-label="Project views"></div>
+          <div class="mode-switch" id="mode-switch" role="group" aria-label="How much detail to show"></div>
+        </div>
         <section class="surface" id="surface" tabindex="0" role="tabpanel" aria-live="polite"></section>
       </main>
 

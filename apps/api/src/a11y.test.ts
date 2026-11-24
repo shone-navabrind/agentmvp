@@ -14,7 +14,7 @@ const PORT = 8901;
 const BASE = `http://127.0.0.1:${PORT}`;
 const webRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "web", "public");
 
-const TABS = ["chat", "board", "flows", "triggers", "repos", "terminal", "plugins", "billing"];
+const TABS = ["setup", "chat", "board", "flows", "triggers", "repos", "terminal", "plugins", "billing"];
 
 type Violation = { id: string; impact: string | null; help: string; nodes: unknown[] };
 
@@ -51,7 +51,7 @@ describe("accessibility (axe-core, WCAG 2.1 A/AA)", () => {
       evaluate: (fn: unknown) => Promise<{ violations: Violation[] }>;
     };
 
-    await page.goto(BASE, { waitUntil: "networkidle" });
+    await page.goto(BASE + "?role=operator", { waitUntil: "networkidle" });
     await page.waitForSelector("#session-list [data-session]", { timeout: 15_000 });
 
     for (const tab of TABS) {
@@ -95,6 +95,6 @@ describe("accessibility (axe-core, WCAG 2.1 A/AA)", () => {
       return;
     }
     // Guards against a selector change silently turning this suite into a no-op.
-    assert.equal(TABS.length, 8);
+    assert.equal(TABS.length, 9);
   });
 });

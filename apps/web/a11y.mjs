@@ -7,11 +7,11 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH ?? "/opt/node-tools/nod
 const AXE = require.resolve("axe-core/axe.min.js");
 
 const BASE = process.env.BASE ?? "http://localhost:8787";
-const TABS = ["chat", "board", "flows", "triggers", "repos", "terminal", "plugins", "billing"];
+const TABS = ["setup", "chat", "board", "flows", "triggers", "repos", "terminal", "plugins", "billing"];
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1600, height: 950 } });
-await page.goto(BASE, { waitUntil: "networkidle" });
+await page.goto(BASE + "?role=operator", { waitUntil: "networkidle" });
 await page.waitForSelector("#session-list li, #session-list button", { timeout: 10_000 });
 
 const axeSource = readFileSync(AXE, "utf8");

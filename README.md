@@ -7,11 +7,12 @@ flow runtime, triggers, plugins and metered model spend built on one event log.
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — the design, the kernel, the extension
   model, the build order, and where it goes wrong
 - **[docs/STATUS.md](docs/STATUS.md)** — what is built, what is not, and why
+- **[docs/anatomy.html](docs/anatomy.html)** — the system anatomy, with diagrams
 - **[docs/screenshots/](docs/screenshots/)** — the UI, captured against the running stack
 
 ```bash
 npm install
-npm test        # 177 tests, 9 packages, no external services
+npm test        # 239 tests, 11 packages, no external services
 npm start       # http://localhost:8787
 ```
 
@@ -19,6 +20,8 @@ npm start       # http://localhost:8787
 
 ```
 packages/kernel     event log · projections · durable step runtime · authz · secrets · outbox
+packages/blueprints pre-baked environments; catalog and AI-synthesised stacks, one pipeline
+packages/harness    normalized harness events, Claude Code adapter
 packages/flow       typed-edge graph runtime, guards, human-in-the-loop
 packages/compute    ComputeDriver, host splitting, capability negotiation, warm pool
 packages/sandbox    git worktrees per session, cgroups, ports, admission control

@@ -46,13 +46,19 @@ describe("catalog", () => {
     assert.deepEqual(searchCatalog("cobol"), []);
   });
 
-  test("every blueprint speaks plainly to a non-technical reader", () => {
-    const jargon = /docker|container|compose|localhost|port \d|sql dump|daemon/i;
+  test("every string a non-technical reader sees avoids jargon", () => {
+    // Guided mode renders whatYouGet AND every slot hint verbatim, so both are covered.
+    const jargon = /docker|container|compose|localhost|port \d|pg_dump|mysqldump|daemon|stdout|env var|\bCLI\b/i;
+    const check = (bp: { id: string }, where: string, text: string) =>
+      assert.ok(!jargon.test(text), `${bp.id} ${where}: jargon in user-facing copy: "${text}"`);
+
     for (const bp of CATALOG) {
       assert.ok(bp.ui.whatYouGet.length >= 2, `${bp.id} needs whatYouGet`);
-      for (const line of bp.ui.whatYouGet) {
-        assert.ok(!jargon.test(line), `${bp.id}: jargon in non-technical copy: "${line}"`);
-      }
+      for (const line of bp.ui.whatYouGet) check(bp, "whatYouGet", line);
+      for (const r of bp.repos) if (r.hint) check(bp, `repo:${r.id}`, r.hint);
+      for (const sd of bp.seeds) if (sd.hint) check(bp, `seed:${sd.id}`, sd.hint);
+      for (const i of bp.inputs) if (i.hint) check(bp, `input:${i.key}`, i.hint);
+      for (const label of Object.values(bp.ui.friendlySteps)) check(bp, "friendlySteps", label);
     }
   });
 

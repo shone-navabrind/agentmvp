@@ -1,3 +1,5 @@
+import { icon } from "./icons.js";
+
 const $ = (id) => document.getElementById(id);
 const get = (p) => fetch(p).then((r) => r.json());
 const esc = (s) =>
@@ -5,94 +7,169 @@ const esc = (s) =>
 const money = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" });
 const usd = (micros) => money.format(Number(micros) / 1e6);
 
+/**
+ * Roles do not change what the product can do — they change how much machinery is on
+ * screen and what it is called. One shell, one API, one set of capabilities.
+ */
+const ROLES = {
+  guided: {
+    label: "Guided",
+    blurb: "Plain language. The technical detail is still there if you ask for it.",
+    tabs: ["setup", "chat", "board"],
+    words: {
+      setup: "Get started",
+      chat: "Work",
+      board: "Tasks",
+      sandbox: "Your machine",
+      session: "Task",
+      sessions: "Tasks in progress",
+      blueprint: "Starting point",
+      spend: "Budget",
+    },
+  },
+  builder: {
+    label: "Builder",
+    blurb: "The everyday view: work, tasks, code and previews.",
+    tabs: ["setup", "chat", "board", "repos", "flows"],
+    words: {
+      setup: "Setup",
+      chat: "Session",
+      board: "Board",
+      flows: "Flows",
+      repos: "Repos",
+      sandbox: "Environment",
+      session: "Session",
+      sessions: "Sessions",
+      blueprint: "Blueprint",
+      spend: "Spend",
+    },
+  },
+  operator: {
+    label: "Operator",
+    blurb: "Everything, including the parts that can break production.",
+    tabs: ["setup", "chat", "board", "flows", "triggers", "repos", "terminal", "plugins", "billing"],
+    words: {
+      setup: "Blueprint",
+      chat: "Session",
+      board: "Board",
+      flows: "Flows",
+      triggers: "Triggers",
+      repos: "Repos",
+      terminal: "Terminal",
+      plugins: "Plugins",
+      billing: "Credits",
+      sandbox: "Sandbox",
+      session: "Session",
+      sessions: "Sessions",
+      blueprint: "Blueprint",
+      spend: "Spend",
+    },
+  },
+};
+
+const TAB_META = {
+  setup: { icon: "blueprint", cap: "project:read" },
+  chat: { icon: "session", cap: "project:chat" },
+  board: { icon: "board", cap: "project:read" },
+  flows: { icon: "flow", cap: "project:read" },
+  triggers: { icon: "trigger", cap: "project:read" },
+  repos: { icon: "repo", cap: "project:read" },
+  terminal: { icon: "terminal", cap: "project:terminal:open" },
+  plugins: { icon: "plugin", cap: "plugin:install" },
+  billing: { icon: "credits", cap: "workspace:budget:manage" },
+};
+
+const VIEWER_CAPS = new Set([
+  "project:read", "project:chat", "project:files:write",
+  "project:terminal:open", "workspace:budget:manage", "plugin:install",
+]);
+
 const params = new URLSearchParams(location.search);
 const state = {
+  role: params.get("role") ?? "builder",
   tab: params.get("tab") ?? "chat",
   session: params.get("session") ?? "s-auth",
   data: {},
 };
 
+const W = () => ROLES[state.role].words;
+const guided = () => state.role === "guided";
+
 function syncUrl() {
-  const q = new URLSearchParams({ tab: state.tab, session: state.session });
+  const q = new URLSearchParams({ role: state.role, tab: state.tab, session: state.session });
   history.replaceState(null, "", `${location.pathname}?${q}`);
 }
 
-// Capability-driven rendering: one UI, tabs appear only if the viewer may use them.
-// The viewer here is an admin, so the terminal is unlocked.
-const TABS = [
-  { id: "chat", label: "Session", cap: "project:chat" },
-  { id: "board", label: "Board", cap: "project:read" },
-  { id: "flows", label: "Flows", cap: "project:read" },
-  { id: "triggers", label: "Triggers", cap: "project:read" },
-  { id: "repos", label: "Repos", cap: "project:read" },
-  { id: "terminal", label: "Terminal", cap: "project:terminal:open" },
-  { id: "plugins", label: "Plugins", cap: "project:read" },
-  { id: "billing", label: "Credits", cap: "workspace:budget:manage" },
-];
-const VIEWER_CAPS = new Set([
-  "project:read", "project:chat", "project:files:write",
-  "project:terminal:open", "workspace:budget:manage",
-]);
-
 async function load() {
-  const [project, sessions, board, flows, triggers, billing, plugins, events, authz] =
+  const [project, sessions, board, flows, triggers, billing, plugins, events, blueprints] =
     await Promise.all([
       get("/api/v1/project"), get("/api/v1/sessions"), get("/api/v1/board"),
       get("/api/v1/flows"), get("/api/v1/triggers"), get("/api/v1/billing"),
-      get("/api/v1/plugins"), get("/api/v1/events"), get("/api/v1/authz"),
+      get("/api/v1/plugins"), get("/api/v1/events"), get("/api/v1/blueprints"),
     ]);
-  state.data = { project, sessions, board, flows, triggers, billing, plugins, events, authz };
+  state.data = { project, sessions, board, flows, triggers, billing, plugins, events, blueprints };
   state.data.chat = await get(`/api/v1/sessions/${state.session}`);
   render();
 }
 
 function render() {
+  const tabs = visibleTabs();
+  if (!tabs.includes(state.tab)) state.tab = tabs[0];
   renderRail();
-  renderTabs();
+  renderTabs(tabs);
   renderSurface();
   renderStatus();
 }
 
+function visibleTabs() {
+  return ROLES[state.role].tabs.filter((t) => VIEWER_CAPS.has(TAB_META[t].cap));
+}
+
+/* ========================= rail ========================= */
 function renderRail() {
   const { project, sessions } = state.data;
+  $("rail-title").textContent = "Harness Cloud";
+
   $("project-list").innerHTML = [
-    { id: "p1", name: project.name, state: "running", sub: project.harness },
-    { id: "p2", name: "acme-docs", state: "suspended", sub: "idle 4h" },
-    { id: "p3", name: "data-pipeline", state: "stopped", sub: "stopped" },
+    { id: "p1", name: project.name, state: "running", sub: guided() ? "Ready" : project.harness },
+    { id: "p2", name: "acme-docs", state: "suspended", sub: guided() ? "Asleep" : "idle 4h" },
+    { id: "p3", name: "data-pipeline", state: "stopped", sub: guided() ? "Off" : "stopped" },
   ]
     .map(
-      (p) => `<li>
-        <button class="nav-item" aria-current="${p.id === "p1"}">
-          <span class="dot ${p.state}" aria-hidden="true"></span>
-          <span class="item-main">
-            <span class="item-title">${esc(p.name)}</span>
-            <span class="item-sub">${esc(p.sub)}</span>
-          </span>
-          <span class="sr-only">, ${esc(p.state)}</span>
-        </button>
-      </li>`,
+      (p) => `<li><button class="nav-item" aria-current="${p.id === "p1"}">
+        <span class="dot ${p.state}" aria-hidden="true"></span>
+        <span class="item-main">
+          <span class="item-title">${esc(p.name)}</span>
+          <span class="item-sub">${esc(p.sub)}</span>
+        </span>
+        <span class="sr-only">, ${esc(p.state)}</span>
+      </button></li>`,
     )
     .join("");
 
-  $("capacity").textContent = `${project.capacity.activeSessions}/${project.capacity.maxSessions}`;
+  $("sessions-head-text").textContent = W().sessions;
+  $("capacity").textContent = guided()
+    ? ""
+    : `${project.capacity.activeSessions}/${project.capacity.maxSessions}`;
+
   $("session-list").innerHTML = sessions
     .map(
-      (s) => `<li>
-        <button class="nav-item" data-session="${esc(s.id)}"
-                aria-current="${s.id === state.session}">
-          <span class="dot ${s.state}" aria-hidden="true"></span>
-          <span class="item-main">
-            <span class="item-title">${esc(s.title)}</span>
-            <span class="item-sub"><span translate="no">${esc(s.branch)}</span> · :${s.portRange.from}</span>
-          </span>
-          <span class="sr-only">, ${esc(s.state)}</span>
-        </button>
-      </li>`,
+      (s) => `<li><button class="nav-item" data-session="${esc(s.id)}"
+          aria-current="${s.id === state.session}">
+        <span class="dot ${s.state}" aria-hidden="true"></span>
+        <span class="item-main">
+          <span class="item-title">${esc(s.title)}</span>
+          <span class="item-sub">${
+            guided()
+              ? esc(friendlyState(s.state))
+              : `<span translate="no">${esc(s.branch)}</span> · :${s.portRange.from}`
+          }</span>
+        </span>
+        <span class="sr-only">, ${esc(s.state)}</span>
+      </button></li>`,
     )
     .join("");
 
-  // Real <button>s, so Enter/Space, focus order and the accessible name all come
-  // from the platform rather than a hand-rolled keydown handler on an <li>.
   for (const btn of $("session-list").querySelectorAll("[data-session]")) {
     btn.addEventListener("click", async () => {
       state.session = btn.dataset.session;
@@ -104,18 +181,29 @@ function renderRail() {
   }
 }
 
-function renderTabs() {
-  $("tabs").innerHTML = TABS.map((t) => {
-    const allowed = VIEWER_CAPS.has(t.cap);
-    const on = state.tab === t.id;
-    const lock = allowed
-      ? ""
-      : `<span class="tab-lock" aria-hidden="true">\u{1F512}</span>` +
-        `<span class="sr-only">, requires the ${t.cap} capability</span>`;
-    return `<button class="tab ${on ? "on" : ""} ${allowed ? "" : "locked"}"
-      role="tab" aria-selected="${on}" aria-controls="surface"
-      data-tab="${t.id}" ${allowed ? "" : 'disabled aria-disabled="true"'}>${t.label}${lock}</button>`;
-  }).join("");
+function friendlyState(s) {
+  return { active: "Working now", idle: "Paused", queued: "Waiting its turn", suspended: "Asleep", archived: "Finished" }[s] ?? s;
+}
+
+/* ========================= tabs ========================= */
+function renderTabs(tabs) {
+  const w = W();
+  $("tabs").innerHTML = tabs
+    .map((t) => {
+      const on = state.tab === t;
+      return `<button class="tab ${on ? "on" : ""}" role="tab" aria-selected="${on}"
+        aria-controls="surface" data-tab="${t}">${icon(TAB_META[t].icon)}${esc(w[t] ?? t)}</button>`;
+    })
+    .join("");
+
+  $("mode-switch").innerHTML = Object.entries(ROLES)
+    .map(
+      ([k, r]) =>
+        `<button class="mode-btn" data-role="${k}" aria-pressed="${state.role === k}"
+           title="${esc(r.blurb)}">${esc(r.label)}</button>`,
+    )
+    .join("");
+
   for (const b of $("tabs").querySelectorAll(".tab")) {
     b.addEventListener("click", () => {
       state.tab = b.dataset.tab;
@@ -123,153 +211,283 @@ function renderTabs() {
       render();
     });
   }
+  for (const b of $("mode-switch").querySelectorAll(".mode-btn")) {
+    b.addEventListener("click", () => {
+      state.role = b.dataset.role;
+      syncUrl();
+      render();
+    });
+  }
 }
 
+/* ========================= surface ========================= */
 function renderSurface() {
-  const s = $("surface");
-  const d = state.data;
   const views = {
-    chat: () => viewChat(d),
-    board: () => viewBoard(d),
-    flows: () => viewFlows(d),
-    triggers: () => viewTriggers(d),
-    repos: () => viewRepos(d),
-    terminal: () => viewTerminal(d),
-    plugins: () => viewPlugins(d),
-    billing: () => viewBilling(d),
+    setup: viewSetup, chat: viewChat, board: viewBoard, flows: viewFlows,
+    triggers: viewTriggers, repos: viewRepos, terminal: viewTerminal,
+    plugins: viewPlugins, billing: viewBilling,
   };
-  s.innerHTML = (views[state.tab] ?? views.chat)();
+  $("surface").innerHTML = (views[state.tab] ?? viewChat)(state.data);
 }
 
+/* ---- setup: the blueprint / onboarding surface ---- */
+function viewSetup(d) {
+  const bp = d.blueprints;
+  const g = guided();
+
+  const gets = bp.active.whatYouGet
+    .map((l) => `<li>${icon("check")}<span>${esc(l)}</span></li>`)
+    .join("");
+
+  const needs = bp.catalog.find((c) => c.id === bp.active.id)?.needs ?? { repos: [], seeds: [], inputs: [] };
+  const slot = (iconName, label, hint, filled, detail) => `
+    <div class="slot">
+      ${icon(iconName)}
+      <span class="slot-main">
+        <span class="slot-label">${esc(label)}</span>
+        <span class="slot-hint">${esc(hint ?? "")}</span>
+      </span>
+      <span class="slot-state">${
+        filled
+          ? `<span class="pill ready">${icon("check", { size: 12 })} ${esc(detail)}</span>`
+          : `<span class="pill waiting">Not set</span>`
+      }</span>
+    </div>`;
+
+  const repoSlots = needs.repos
+    .map((r) => slot("repo", r.label, r.hint, (bp.bindings.repos[r.id] ?? []).length > 0, (bp.bindings.repos[r.id] ?? []).join(", ")))
+    .join("");
+  const seedSlots = needs.seeds
+    .map((s) =>
+      slot(
+        "upload",
+        s.label,
+        g && s.scrubs.length ? `${s.hint} ` : s.hint,
+        Boolean(bp.bindings.seeds[s.id]),
+        "Uploaded",
+      ),
+    )
+    .join("");
+  const inputSlots = needs.inputs
+    .map((i) => slot("shield", i.label, i.hint, Boolean(bp.bindings.inputs[i.key]), i.secret ? "Set" : esc(bp.bindings.inputs[i.key] ?? "")))
+    .join("");
+
+  const steps = bp.steps
+    .map(
+      (s, idx) =>
+        `<div class="tl" style="animation-delay:${idx * 40}ms">${icon("check")}<span>${esc(s.label)}</span></div>`,
+    )
+    .join("");
+
+  const others = bp.catalog
+    .filter((c) => c.id !== bp.active.id)
+    .map(
+      (c) => `<button class="bp">
+        <span class="bp-name">${esc(c.name)}</span>
+        <span class="bp-sum">${esc(c.summary)}</span>
+        <span class="bp-foot">
+          <span class="chip plain">${c.services} service${c.services === 1 ? "" : "s"}</span>
+          <span class="chip plain">~${c.estimateMinutes} min</span>
+        </span>
+      </button>`,
+    )
+    .join("");
+
+  return `<div class="wrap-wide">
+    <h2 class="sec">${esc(g ? "Your starting point" : bp.active.name)}</h2>
+    <p class="sec-note">${esc(
+      g
+        ? "We set this up for you already. Nothing here needs you to know how it works."
+        : bp.active.summary,
+    )}</p>
+
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-name">${esc(g ? "What you have" : "What this gives you")}</span>
+        <span class="pill ${bp.ready ? "ready" : "waiting"}">${
+          bp.ready ? "Ready" : "Needs input"
+        }</span>
+      </div>
+      <ul class="gets">${gets}</ul>
+    </div>
+
+    <h3 class="sub">${esc(g ? "What we used" : "Bindings")}</h3>
+    <div class="slots">${repoSlots}${seedSlots}${g ? "" : inputSlots}</div>
+
+    <h3 class="sub">${esc(g ? "How it was set up" : "Provisioning plan")}</h3>
+    <div class="timeline">${steps}</div>
+
+    ${
+      g
+        ? ""
+        : `<h3 class="sub">Generated compose</h3>
+           <pre class="well">${esc(bp.compose.trim())}</pre>`
+    }
+
+    <h3 class="sub">${esc(g ? "Other things we can set up" : "Other blueprints")}</h3>
+    <div class="bp-grid">
+      ${others}
+      <button class="bp">
+        <span class="bp-name">${icon("sparkle")} Describe your own</span>
+        <span class="bp-sum">Tell us the stack in a sentence — "Django 5 with Postgres and Redis" — and we build and check it before anything runs.</span>
+        <span class="bp-foot"><span class="chip plain">Any stack</span></span>
+      </button>
+    </div>
+
+    <p class="note">${esc(
+      g
+        ? "Your data was copied, not moved. Contact details are removed and email sending is switched off, so nothing can reach your real customers."
+        : "A catalog blueprint and an AI-synthesised one produce the same validated artifact and run the same provisioning graph. Uploaded dumps are neutralised before the agent sees them.",
+    )}</p>
+  </div>`;
+}
+
+/* ---- chat ---- */
 function viewChat(d) {
-  const title = d.chat.title;
+  const g = guided();
   const body = d.chat.events
     .map((e) => {
       if (e.type === "session.started") {
-        return `<div class="tool"><span class="tick">▸</span> Session started on <span class="mono">${esc(e.payload.branch)}</span></div>`;
+        return g
+          ? ""
+          : `<div class="activity">${icon("check")}Session started on <span class="mono">${esc(e.payload.branch)}</span></div>`;
       }
       if (e.type === "tool.ran") {
-        return `<div class="tool"><span class="tick">✓</span> ${esc(e.payload.summary)}</div>`;
+        return `<div class="activity">${icon("check")}${esc(e.payload.summary)}</div>`;
       }
       const who = e.actor.kind === "user" ? "user" : "agent";
       return `<div class="msg ${who}">
-        <div class="msg-avatar">${who === "user" ? "S" : "pi"}</div>
+        <div class="msg-avatar">${who === "user" ? "S" : "A"}</div>
         <div class="msg-body">
-          <div class="msg-who">${who === "user" ? "shone" : "pi · claude-sonnet-5-5"}</div>
+          <div class="msg-who">${who === "user" ? "You" : g ? "Assistant" : "pi · claude-sonnet-5-5"}</div>
           <div class="msg-text">${esc(e.payload.text)}</div>
         </div>
       </div>`;
     })
     .join("");
 
-  return `<h2 class="sec">${esc(title)}</h2>${body}
+  return `<div class="wrap">
+    <h2 class="sec">${esc(d.chat.title)}</h2>
+    ${body}
     <div class="composer">
-      <span>Reply to pi…</span>
-      <span class="composer-meta" translate="no">${esc(state.session)} · ${esc(d.project.model)}</span>
+      <span>${esc(g ? "Tell the assistant what you need…" : "Reply to pi…")}</span>
+      <span class="composer-meta" translate="no">${esc(
+        g ? "" : `${state.session} · ${d.project.model}`,
+      )}</span>
     </div>
-    <div class="note">Tool activity is shown as friendly summaries. Raw tool calls, VM names
-      and IPs are never rendered for members — this view is capability-filtered, not a
-      separate app.</div>`;
+  </div>`;
 }
 
+/* ---- board ---- */
 function viewBoard(d) {
   const order = ["todo", "doing", "review", "blocked", "done"];
+  const names = guided()
+    ? { todo: "To do", doing: "In progress", review: "Ready to check", blocked: "Needs you", done: "Done" }
+    : { todo: "todo", doing: "doing", review: "review", blocked: "blocked", done: "done" };
   const cols = order
-    .map((state_) => {
-      const cards = d.board.columns[state_] ?? [];
+    .map((k) => {
+      const cards = d.board.columns[k] ?? [];
       return `<div>
-        <h3 class="col-head"><span>${state_}</span><span>${cards.length}</span></h3>
-        ${cards.map(card).join("") || `<p class="empty-col">Nothing in ${state_}</p>`}
+        <h3 class="col-head"><span>${esc(names[k])}</span><span>${cards.length}</span></h3>
+        ${cards.map(card).join("") || `<p class="empty-col">Nothing here</p>`}
       </div>`;
     })
     .join("");
-  return `<h2 class="sec">Board · acme-platform</h2><div class="board">${cols}</div>
-    <div class="note">The board is a projection of the event log, not a separate datastore.
-      Blocked cards with a reason were raised automatically by paused or failed flow runs —
-      this is the human-in-the-loop inbox.</div>`;
+  return `<div class="wrap-wide">
+    <h2 class="sec">${esc(guided() ? "Tasks" : "Board")}</h2>
+    <p class="sec-note">${esc(
+      guided()
+        ? "Anything in “Needs you” is waiting on a decision only you can make."
+        : "A projection of the event log. Blocked cards were raised automatically by paused or failed runs.",
+    )}</p>
+    <div class="board">${cols}</div>
+  </div>`;
 }
 
 function card(t) {
-  const labels = (t.labels ?? []).map((l) => `<span class="chip label">${esc(l)}</span>`).join("");
+  const g = guided();
   const assignee = t.assignee
-    ? `<span class="chip ${t.assignee.startsWith("agent") ? "agent" : "user"}">${esc(t.assignee)}</span>`
+    ? `<span class="chip ${t.assignee.startsWith("agent") ? "agent" : "user"}">${esc(
+        g ? (t.assignee.startsWith("agent") ? "Assistant" : "You") : t.assignee,
+      )}</span>`
     : "";
+  const labels = g ? "" : (t.labels ?? []).map((l) => `<span class="chip">${esc(l)}</span>`).join("");
   const prs = (t.pr_urls ?? [])
-    .map((u) => `<span class="chip pr">PR #${esc(u.split("/").pop())}</span>`)
+    .map((u) => `<span class="chip pr">${esc(g ? "Change ready" : `PR #${u.split("/").pop()}`)}</span>`)
     .join("");
-  const reason = t.reason ? `<span class="chip warn">${esc(t.reason)}</span>` : "";
+  const reason = t.reason ? `<span class="chip warn">${esc(g ? "Your decision" : t.reason)}</span>` : "";
   return `<div class="card ${t.reason ? "blocked" : ""}">
     <div class="card-title">${esc(t.title)}</div>
     <div class="card-meta">${assignee}${labels}${prs}${reason}</div>
   </div>`;
 }
 
+/* ---- flows ---- */
 function viewFlows(d) {
+  const mark = { completed: "check", failed: "cross", ambiguous: "cross", suspended: "pause" };
   const runs = d.flows.runs
     .map((r) => {
       const steps = (r.steps ?? [])
         .map(
           (s, i) =>
-            `${i ? '<span class="arrow">→</span>' : ""}<span class="step ${s.state}">${
-              { completed: "✓", failed: "✕", ambiguous: "!", suspended: "⏸" }[s.state] ?? "•"
-            } ${esc(s.step_key)}</span>`,
+            `${i ? `<span class="arrow">${icon("chevron", { size: 12 })}</span>` : ""}` +
+            `<span class="step ${s.state}">${icon(mark[s.state] ?? "dot", { size: 12 })}${esc(s.step_key)}</span>`,
         )
         .join("");
-      const q = r.state === "paused" ? pausedQuestion(d, r.id) : "";
-      // A paused run carries a SUSPEND_RUN "error" that is not an error; only show
-      // the red note for a genuinely failed run.
+      const gate = r.state === "paused" ? pausedGate(d, r.id) : "";
       const err =
         r.state === "failed" && r.error
-          ? `<div class="note err-text">${esc(r.error.code ?? "")} — ${esc(r.error.message ?? "")}</div>`
+          ? `<p class="note err-text">${esc(r.error.code ?? "")} — ${esc(r.error.message ?? "")}</p>`
           : "";
-      return `<div class="run">
-        <div class="run-head">
-          <span class="run-name">${esc(r.kind)}</span>
-          <span class="pill ${r.state}">${r.state}</span>
+      return `<div class="panel">
+        <div class="panel-head">
+          <span class="panel-name">${esc(r.kind)}</span>
+          <span class="pill ${r.state}">${esc(r.state)}</span>
         </div>
-        <div class="steps">${steps || '<span class="step pending">no steps yet</span>'}</div>
-        ${q}${err}
+        <div class="steps">${steps || '<span class="step">no steps yet</span>'}</div>
+        ${gate}${err}
       </div>`;
     })
     .join("");
-  return `<h2 class="sec">Flow runs</h2>${runs}
-    <div class="note">Every node runs through the kernel's step runtime, so each completed
-      step is memoised: a run that is killed mid-flight resumes from exactly here and
-      produces identical output. Guards (maxSteps, maxCostUsd, stall detection) are
-      required on any graph containing a cycle.</div>`;
+  return `<div class="wrap-wide">
+    <h2 class="sec">Flow runs</h2>
+    <p class="sec-note">Every node runs on the durable step runtime, so a run killed mid-flight resumes from exactly where it stopped and produces identical output.</p>
+    ${runs}
+  </div>`;
 }
 
-function pausedQuestion(d, runId) {
+function pausedGate(d, runId) {
   const a = d.flows.awaiting.find((x) => x.id === runId);
   if (!a?.question) return "";
   const opts = (a.question.options ?? ["approve", "reject"])
     .map((o, i) => `<button class="btn ${i === 0 ? "primary" : ""}">${esc(o)}</button>`)
     .join("");
-  return `<div class="question">
-    <div class="q-text">${esc(a.question.text)}</div>
-    <div class="q-actions">${opts}</div>
+  return `<div class="gate">
+    <div class="gate-text">${esc(a.question.text)}</div>
+    <div class="gate-actions">${opts}</div>
   </div>`;
 }
 
+/* ---- triggers ---- */
 function viewTriggers(d) {
   const rows = d.triggers
     .map(
       (t) => `<tr>
-      <td>${esc(t.name)}<div class="mono" style="color:var(--fg-faint)">${esc(t.id)}</div></td>
+      <td>${esc(t.name)}<div class="mono">${esc(t.id)}</div></td>
       <td class="mono">${esc(describeSource(t.source))}</td>
       <td class="mono">${esc(t.action.flowKind ?? t.action.type)}</td>
       <td>${esc(t.concurrency)}</td>
-      <td><span class="pill ${t.enabled ? "active" : "off"}">${t.enabled ? "enabled" : "disabled"}</span></td>
+      <td><span class="pill ${t.enabled ? "active" : "off"}">${t.enabled ? "on" : "off"}</span></td>
       <td class="mono">${t.firings}</td>
     </tr>`,
     )
     .join("");
-  return `<h2 class="sec">Triggers</h2>
-    <table><thead><tr><th>Name</th><th>Source</th><th>Action</th><th>Concurrency</th><th>State</th><th>Firings</th></tr></thead>
+  return `<div class="wrap-wide">
+    <h2 class="sec">Triggers</h2>
+    <p class="sec-note">Events, schedules, inbound webhooks and repository activity all start the same kind of job, so they share concurrency rules, rate limits and a dead-letter queue.</p>
+    <table><thead><tr><th>Name</th><th>Source</th><th>Runs</th><th>Overlap</th><th>State</th><th>Fired</th></tr></thead>
     <tbody>${rows}</tbody></table>
-    <div class="note">Events, cron, inbound webhooks and repo events all produce the same
-      thing — a job on the step runtime — so they share concurrency policy, rate limiting,
-      a dead-letter queue and one correlation id you can trace end to end.</div>`;
+  </div>`;
 }
 
 function describeSource(s) {
@@ -279,15 +497,13 @@ function describeSource(s) {
   return `repo ${s.repo}`;
 }
 
+/* ---- repos ---- */
 function viewRepos(d) {
+  const g = guided();
   const rows = d.project.repos
     .map(
-      (r) => `<tr>
-      <td>${esc(r.name)}</td>
-      <td class="mono">${esc(r.remote)}</td>
-      <td class="mono">${esc(r.branch)}</td>
-      <td class="mono">/srv/git/${esc(r.name)}.git</td>
-    </tr>`,
+      (r) => `<tr><td>${esc(r.name)}</td><td class="mono">${esc(r.remote)}</td>
+        <td class="mono">${esc(r.branch)}</td></tr>`,
     )
     .join("");
   const wt = d.sessions
@@ -295,174 +511,146 @@ function viewRepos(d) {
       (s) => `<tr>
       <td>${esc(s.title)}</td>
       <td class="mono">${esc(s.branch)}</td>
-      <td class="mono">/work/${esc(s.id)}/</td>
-      <td><span class="pill ${s.state}">${s.state}</span></td>
+      <td><span class="pill ${s.state}">${esc(g ? friendlyState(s.state) : s.state)}</span></td>
     </tr>`,
     )
     .join("");
-  return `<h2 class="sec">Repositories</h2>
-    <table><thead><tr><th>Name</th><th>Remote</th><th>Default</th><th>Bare clone</th></tr></thead><tbody>${rows}</tbody></table>
-    <h2 class="sec">Session worktrees</h2>
-    <table><thead><tr><th>Session</th><th>Branch</th><th>Worktree</th><th>State</th></tr></thead><tbody>${wt}</tbody></table>
-    <div class="note">One bare clone per repo, one git worktree per session. Sessions edit the
-      same files without colliding, git stays fast on a single object store, and promotion to
-      the project's main branch is always explicit. Uncommitted work is auto-committed on
-      suspend: the sandbox is disposable, the git remote is the source of truth.</div>`;
+  return `<div class="wrap-wide">
+    <h2 class="sec">${esc(g ? "Your code" : "Repositories")}</h2>
+    <p class="sec-note">${esc(
+      g
+        ? "Each task works on its own copy, so nothing anyone else is doing can break your work."
+        : "One bare clone per repo, one worktree per session. Promotion to the main branch is always explicit.",
+    )}</p>
+    <table><thead><tr><th>Name</th><th>Remote</th><th>Default branch</th></tr></thead><tbody>${rows}</tbody></table>
+    <h3 class="sub">${esc(g ? "What each task is working on" : "Session worktrees")}</h3>
+    <table><thead><tr><th>${esc(W().session)}</th><th>Branch</th><th>State</th></tr></thead><tbody>${wt}</tbody></table>
+  </div>`;
 }
 
+/* ---- terminal ---- */
 function viewTerminal(d) {
   const sess = d.sessions.find((s) => s.id === state.session) ?? d.sessions[0];
-  return `<h2 class="sec">Terminal · ${esc(sess.title)}</h2>
-    <div class="run"><div class="mono" style="line-height:1.7">
-      <div style="color:var(--fg-faint)">root@${esc(d.project.sandbox.id)}:/work/${esc(sess.id)}/api$ git status --short</div>
-      <div> M src/auth/oauth.ts</div>
-      <div> M src/routes/login.tsx</div>
-      <div style="color:var(--fg-faint)">root@${esc(d.project.sandbox.id)}:/work/${esc(sess.id)}/api$ systemd-cgls ${esc(sess.cgroupScope)}</div>
-      <div>${esc(sess.cgroupScope)} (MemoryMax=${sess.memMiB}M, CPUWeight=${sess.cpuWeight})</div>
-      <div>└─ 2 processes</div>
-      <div style="color:var(--fg-faint)">root@${esc(d.project.sandbox.id)}:/work/${esc(sess.id)}/api$ <span style="background:var(--fg);color:var(--bg)">&nbsp;</span></div>
-    </div></div>
-    <div class="note warn-text">This tab requires the <span class="mono">project:terminal:open</span>
-      capability, granted per user per project. Every session is recorded and audited with
-      actor, project and start/end. A member without the grant does not see this tab at all.</div>`;
+  return `<div class="wrap-wide">
+    <h2 class="sec">Terminal · ${esc(sess.title)}</h2>
+    <p class="sec-note">Requires the <span class="mono">project:terminal:open</span> capability, granted per user per project. Every session is recorded and audited.</p>
+    <pre class="well"><span class="prompt">root@${esc(d.project.sandbox.id)}:/work/${esc(sess.id)}/addons$</span> git status --short
+ M models/sale_order.py
+ M views/sale_view.xml
+<span class="prompt">root@${esc(d.project.sandbox.id)}:/work/${esc(sess.id)}/addons$</span> docker compose ps
+NAME   IMAGE        STATUS
+db     postgres:16  Up (healthy)
+odoo   odoo:18      Up (healthy)
+<span class="prompt">root@${esc(d.project.sandbox.id)}:/work/${esc(sess.id)}/addons$</span> <span class="cursor"> </span></pre>
+  </div>`;
 }
 
+/* ---- plugins ---- */
 function viewPlugins(d) {
   const rows = d.plugins
     .map(
       (p) => `<tr>
-      <td>${esc(p.id)} <span class="mono" style="color:var(--fg-faint)">${esc(p.version)}</span>
-        <div style="color:var(--fg-faint);font-size:11px">${esc(p.description)}</div></td>
-      <td><span class="chip">${esc(p.trust)}</span> <span class="chip">${esc(p.runtime)}</span></td>
-      <td class="mono">${p.provides.map((x) => esc(x.point)).join("<br>")}</td>
+      <td>${esc(p.id)} <span class="mono">${esc(p.version)}</span>
+        <div class="slot-hint">${esc(p.description)}</div></td>
+      <td><span class="chip plain">${esc(p.trust)}</span> <span class="chip plain">${esc(p.runtime)}</span></td>
       <td class="mono">${p.capabilities.map(esc).join("<br>") || "—"}</td>
-      <td><span class="pill ${p.state}">${p.state}</span>
-        ${p.failures ? `<div class="mono err-text" style="font-size:10.5px">${p.failures} failures</div>` : ""}
-        ${p.lastError ? `<div class="mono" style="font-size:10px;color:var(--fg-faint)">${esc(p.lastError)}</div>` : ""}
-      </td>
+      <td><span class="pill ${p.state}">${esc(p.state)}</span>
+        ${p.failures ? `<div class="mono err-text">${p.failures} failures</div>` : ""}</td>
     </tr>`,
     )
     .join("");
-  return `<h2 class="sec">Plugins</h2>
-    <table><thead><tr><th>Plugin</th><th>Trust</th><th>Extension points</th><th>Capabilities</th><th>State</th></tr></thead>
-    <tbody>${rows}</tbody></table>
-    <div class="note">Capabilities are declared in the manifest, shown here at install, and
-      enforced at every call — a plugin cannot reach a host or read a secret it did not
-      declare. Untrusted plugins may never run in the API process. A plugin that keeps
-      failing is circuit-broken and disappears from its extension point; the host keeps serving.</div>`;
+  return `<div class="wrap-wide">
+    <h2 class="sec">Plugins</h2>
+    <p class="sec-note">Capabilities are declared in the manifest and enforced at every call. Untrusted plugins never run in the API process, and one that keeps failing is circuit-broken rather than retried.</p>
+    <table><thead><tr><th>Plugin</th><th>Trust</th><th>Capabilities</th><th>State</th></tr></thead><tbody>${rows}</tbody></table>
+  </div>`;
 }
 
+/* ---- billing ---- */
 function viewBilling(d) {
   const b = d.billing;
   const spent = b.granted * 1e6 - Number(b.balanceMicros);
   const pct = Math.round((spent / (b.granted * 1e6)) * 100);
   const entries = b.entries
     .map(
-      (e) => `<tr>
-      <td>${esc(e.kind)}</td>
-      <td class="mono">${e.project_id ?? "—"}</td>
+      (e) => `<tr><td>${esc(e.kind)}</td><td class="mono">${e.project_id ?? "—"}</td>
       <td class="mono">${usd(e.amount_micros)}</td>
-      <td>${e.billable ? '<span class="chip">charged</span>' : '<span class="chip">BYOK · not charged</span>'}</td>
-      <td class="mono" style="color:var(--fg-faint)">${esc(e.idem_key)}</td>
-    </tr>`,
+      <td>${e.billable ? "" : '<span class="chip plain">your own key</span>'}</td></tr>`,
     )
     .join("");
-  const alerts = (b.alerts ?? [])
-    .map((a) => `<div class="note warn-text">Budget alert: ${a.level}% of credit consumed.</div>`)
-    .join("");
-  return `<h2 class="sec">Credits</h2>
-    <div class="run">
-      <div class="stat-row"><span class="stat-k">Granted</span><span class="stat-v">$${b.granted.toFixed(2)}</span></div>
+  return `<div class="wrap-wide">
+    <h2 class="sec">${esc(W().spend)}</h2>
+    <div class="panel">
+      <div class="stat-row"><span class="stat-k">Granted</span><span class="stat-v">${money.format(b.granted)}</span></div>
       <div class="stat-row"><span class="stat-k">Spent</span><span class="stat-v">${usd(spent)}</span></div>
       <div class="stat-row"><span class="stat-k">Remaining</span><span class="stat-v">${usd(b.balanceMicros)}</span></div>
       <div class="meter ${pct < 80 ? "ok" : ""}"><i style="width:${Math.min(100, pct)}%"></i></div>
-      <div class="stat-row"><span class="stat-k">Gateway cap on sk-proj-p1</span>
-        <span class="stat-v">$${(b.gatewayBudgets["sk-proj-p1"] ?? 0).toFixed(2)}</span></div>
       <div class="stat-row"><span class="stat-k">Ledger drift</span>
-        <span class="stat-v ${b.reconcile.drift === 0 ? "ok-text" : "err-text"}">${b.reconcile.drift} µ$</span></div>
+        <span class="stat-v ${b.reconcile.drift === 0 ? "ok-text" : "err-text"}">${b.reconcile.drift}</span></div>
     </div>
-    ${alerts}
-    <h2 class="sec">Ledger</h2>
-    <table><thead><tr><th>Kind</th><th>Project</th><th>Amount</th><th>Billing</th><th>Idempotency key</th></tr></thead>
-    <tbody>${entries}</tbody></table>
-    <div class="note">Append-only, in USD micro-units, with idempotency keys: a replayed
-      spend-sync cannot double-charge. The gateway's own cap is set to the remaining balance,
-      so it refuses at zero rather than the platform discovering the overspend later.</div>`;
+    <h3 class="sub">Ledger</h3>
+    <table><thead><tr><th>Kind</th><th>Project</th><th>Amount</th><th>Billing</th></tr></thead><tbody>${entries}</tbody></table>
+  </div>`;
 }
 
+/* ========================= right rail ========================= */
 function renderStatus() {
   const d = state.data;
   const p = d.project;
   const b = d.billing;
-  const spentPct = Math.round(((b.granted * 1e6 - Number(b.balanceMicros)) / (b.granted * 1e6)) * 100);
+  const g = guided();
   const sess = d.sessions.find((s) => s.id === state.session);
+  const spentPct = Math.round(((b.granted * 1e6 - Number(b.balanceMicros)) / (b.granted * 1e6)) * 100);
 
-  const authzRows = d.authz
-    .map(
-      (a) => `<div class="stat-row">
-        <span class="stat-k">${esc(a.subject)}</span>
-        <span class="stat-v">${Object.values(a.decisions).filter(Boolean).length}/${Object.keys(a.decisions).length}</span>
-      </div>`,
-    )
-    .join("");
+  const machine = g
+    ? `<div class="stat-row"><span class="stat-k">State</span><span class="stat-v ok-text">Ready</span></div>
+       <div class="stat-row"><span class="stat-k">Running</span><span class="stat-v">${esc(d.blueprints.active.name)}</span></div>`
+    : `<div class="stat-row"><span class="stat-k">State</span><span class="stat-v ok-text">${esc(p.sandbox.state)}</span></div>
+       <div class="stat-row"><span class="stat-k">Blueprint</span><span class="stat-v">${esc(d.blueprints.active.id)}</span></div>
+       <div class="stat-row"><span class="stat-k">Driver</span><span class="stat-v">${esc(p.sandbox.driver)}</span></div>
+       <div class="stat-row"><span class="stat-k">Isolation</span><span class="stat-v">${esc(p.sandbox.isolation)}</span></div>
+       <div class="stat-row"><span class="stat-k">Size</span><span class="stat-v">${p.sandbox.size.vcpu} vCPU · ${p.sandbox.size.memMiB} MiB</span></div>`;
 
-  const events = d.events
-    .slice(0, 9)
-    .map(
-      (e) => `<div class="evt">
-        <span class="evt-seq">${esc(e.seq)}</span>
-        <span class="evt-type" translate="no">${esc(e.type)}</span>
-      </div>`,
-    )
-    .join("");
+  const sessionBlock =
+    sess && !g
+      ? `<div class="stat-group">
+          <div class="stat-head">This ${esc(W().session.toLowerCase())}</div>
+          <div class="stat-row"><span class="stat-k">Branch</span><span class="stat-v">${esc(sess.branch)}</span></div>
+          <div class="stat-row"><span class="stat-k">Ports</span><span class="stat-v">${sess.portRange.from}–${sess.portRange.to}</span></div>
+          <div class="stat-row"><span class="stat-k">Memory cap</span><span class="stat-v">${sess.memMiB} MiB</span></div>
+        </div>`
+      : "";
+
+  const eventsBlock = g
+    ? ""
+    : `<div class="stat-group">
+        <div class="stat-head">Recent events</div>
+        ${d.events.slice(0, 8).map((e) => `<div class="evt"><span class="evt-seq">${esc(e.seq)}</span><span class="evt-type" translate="no">${esc(e.type)}</span></div>`).join("")}
+      </div>`;
 
   $("status").innerHTML = `
     <div class="stat-group">
-      <div class="stat-head">Sandbox</div>
-      <div class="stat-row"><span class="stat-k">State</span><span class="stat-v ok-text">${esc(p.sandbox.state)}</span></div>
-      <div class="stat-row"><span class="stat-k">Driver</span><span class="stat-v">${esc(p.sandbox.driver)}</span></div>
-      <div class="stat-row"><span class="stat-k">Isolation</span><span class="stat-v">${esc(p.sandbox.isolation)}</span></div>
-      <div class="stat-row"><span class="stat-k">Size</span><span class="stat-v">${p.sandbox.size.vcpu} vCPU · ${p.sandbox.size.memMiB} MiB</span></div>
-      <div class="stat-row"><span class="stat-k">Image</span><span class="stat-v">${esc(p.imageVersion)}</span></div>
-      <div class="stat-row"><span class="stat-k">From warm pool</span><span class="stat-v">${p.sandbox.fromWarmPool ? "yes" : "no"}</span></div>
+      <div class="stat-head">${esc(W().sandbox)}</div>
+      ${machine}
     </div>
 
     <div class="stat-group">
-      <div class="stat-head">Capacity</div>
-      <div class="stat-row"><span class="stat-k">Sessions</span><span class="stat-v">${p.capacity.activeSessions} / ${p.capacity.maxSessions}</span></div>
+      <div class="stat-head">${esc(g ? "Capacity" : "Sessions")}</div>
+      <div class="stat-row"><span class="stat-k">${esc(g ? "Tasks running" : "Active")}</span>
+        <span class="stat-v">${p.capacity.activeSessions} / ${p.capacity.maxSessions}</span></div>
       <div class="meter ok"><i style="width:${(p.capacity.activeSessions / p.capacity.maxSessions) * 100}%"></i></div>
-      <div class="stat-row"><span class="stat-k">Warm pool</span><span class="stat-v">${p.capacity.warmPool}</span></div>
-      <div class="stat-row"><span class="stat-k">Host free</span><span class="stat-v">${p.capacity.hostFree.vcpu} vCPU · ${(p.capacity.hostFree.memMiB / 1024).toFixed(0)} GiB</span></div>
     </div>
 
-    ${
-      sess
-        ? `<div class="stat-group">
-      <div class="stat-head">This session</div>
-      <div class="stat-row"><span class="stat-k">Branch</span><span class="stat-v">${esc(sess.branch)}</span></div>
-      <div class="stat-row"><span class="stat-k">Ports</span><span class="stat-v">${sess.portRange.from}–${sess.portRange.to}</span></div>
-      <div class="stat-row"><span class="stat-k">cgroup</span><span class="stat-v">${sess.memMiB} MiB</span></div>
-      <div class="stat-row"><span class="stat-k">State</span><span class="stat-v">${esc(sess.state)}</span></div>
-    </div>`
-        : ""
-    }
+    ${sessionBlock}
 
     <div class="stat-group">
-      <div class="stat-head">Spend</div>
+      <div class="stat-head">${esc(W().spend)}</div>
       <div class="stat-row"><span class="stat-k">Remaining</span><span class="stat-v">${usd(b.balanceMicros)}</span></div>
       <div class="meter ${spentPct < 80 ? "ok" : ""}"><i style="width:${Math.min(100, spentPct)}%"></i></div>
-      <div class="stat-row"><span class="stat-k">of $${b.granted.toFixed(0)} granted</span><span class="stat-v">${spentPct}% used</span></div>
+      <div class="stat-row"><span class="stat-k">of ${money.format(b.granted)}</span><span class="stat-v">${spentPct}% used</span></div>
     </div>
 
-    <div class="stat-group">
-      <div class="stat-head">Capabilities granted</div>
-      ${authzRows}
-    </div>
-
-    <div class="stat-group">
-      <div class="stat-head">Recent events</div>
-      ${events}
-    </div>`;
+    ${eventsBlock}`;
 }
 
 syncUrl();

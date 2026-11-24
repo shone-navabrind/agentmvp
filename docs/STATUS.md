@@ -1,6 +1,6 @@
 # Build status
 
-Against the milestones in `ARCHITECTURE.md` §16. **177 tests, 9 packages, 0 failures**,
+Against the milestones in `ARCHITECTURE.md` §16. **239 tests, 11 packages, 0 failures**,
 no external services — PGlite gives every test a real Postgres 17 in-process.
 
 ```bash
@@ -16,6 +16,8 @@ npm run shots   # re-capture docs/screenshots/
 | # | Milestone | Package | Tests | State |
 |---|---|---|---|---|
 | K1 | Kernel: event log, projections, step runtime, authz, secrets, outbox | `@harness/kernel` | 60 | **done** |
+| — | **Blueprints**: schema, validator, compiler, catalog, AI synthesis | `@harness/blueprints` | 36 | **done** |
+| K5 | **Harness adapters**: normalized events + Claude Code | `@harness/harness` | 24 | **partial** (Claude Code only) |
 | K2 | Compute drivers, host splitting, capability negotiation, warm pool | `@harness/compute` | 20 | **done** (Incus argv only, see below) |
 | K3 | Multi-session: worktrees, cgroups, ports, admission control | `@harness/sandbox` | 13 | **partial** (no sandboxd daemon) |
 | K7 | Flow graph runtime: typed edges, guards, human-in-the-loop | `@harness/flow` | 19 | **done** |
@@ -23,7 +25,7 @@ npm run shots   # re-capture docs/screenshots/
 | K9 | Board: projection, agent assignment, approval inbox, automations | `@harness/board` | 9 | **done** |
 | K10 | Plugins: manifest, capability enforcement, circuit breaker | `@harness/plugins` | 18 | **done** |
 | K12 | Credits: ledger, budget enforcement, spend sync, alerts | `@harness/billing` | 12 | **done** |
-| — | Full-stack integration over all of the above + web UI | `@harness/api` | 10 | **done** |
+| — | Full-stack integration + accessibility gate + web UI | `@harness/api` | 12 | **done** |
 
 ### The two K1 acceptance tests, by name in the suite
 

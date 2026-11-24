@@ -17,7 +17,9 @@
     "@harness/triggers": "*",
     "@harness/billing": "*",
     "@harness/plugins": "*",
-    "zod": "^3.25.76"
+    "zod": "^3.25.76",
+    "@harness/blueprints": "*",
+    "@harness/harness": "*"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

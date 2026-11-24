@@ -1,0 +1,122 @@
+/*
+ * Harness Cloud — design tokens
+ *
+ * Mode: Operate. People live in this all day, so ambition shows as precision and
+ * restraint. One accent, a 4px rhythm, obvious type steps, and elevation declared
+ * exactly once (border OR shadow, never both).
+ *
+ * Every foreground token clears WCAG AA 4.5:1 against --surface-3, the lightest
+ * background in the system. apps/api/src/a11y.test.ts fails the build otherwise.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* ---- surfaces: four steps, each a real elevation, not a shade ---- */
+  --surface-0: #0b0c0e; /* app background */
+  --surface-1: #121316; /* rails, chrome */
+  --surface-2: #17191d; /* panels, cards */
+  --surface-3: #1e2126; /* raised: hover, inputs, selected */
+  --surface-inset: #0e0f11; /* wells: code, terminal */
+
+  /* ---- lines: hairline, divider, strong ---- */
+  --line-1: #23262b;
+  --line-2: #2d3137;
+  --line-3: #3a3f47;
+
+  /* ---- text ---- */
+  --text-1: #edeef0; /* 13.1:1 on surface-3 */
+  --text-2: #a4aab2; /* 6.4:1  — secondary */
+  --text-3: #8c939b; /* 4.9:1  — tertiary, the floor for body text */
+
+  /* ---- one accent, three roles ---- */
+  --accent: #e0825f; /* text and strokes on dark: 5.2:1 */
+  --accent-solid: #b9552f; /* fills behind white text: 4.6:1 */
+  --accent-wash: #241a16; /* tinted surface */
+
+  /* ---- status: hue carries meaning, all AA ---- */
+  --ok: #58a87a;
+  --ok-wash: #16241c;
+  --warn: #cfa94a;
+  --warn-wash: #262014;
+  --danger: #dd7a6e;
+  --danger-wash: #2a1a18;
+  --info: #6f9ad6;
+  --info-wash: #161f2a;
+
+  --focus: #8ab4f8;
+  --select-bg: #2b3a52;
+
+  /* ---- 4px rhythm ---- */
+  --s1: 4px;  --s2: 8px;  --s3: 12px; --s4: 16px;
+  --s5: 24px; --s6: 32px; --s7: 48px; --s8: 64px;
+
+  /* ---- radii: 6 for controls, 10 for cards; pills only on small controls ---- */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-pill: 999px;
+
+  /* ---- type: obvious steps, tight tracking, never below -0.04em ---- */
+  --font: "Inter", ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --t-display: 28px;
+  --t-title: 19px;
+  --t-head: 15px;
+  --t-body: 13.5px;
+  --t-small: 12.5px;
+  --t-micro: 11px;
+
+  --tracking-display: -0.025em;
+  --tracking-title: -0.02em;
+  --tracking-label: 0.06em;
+
+  /* ---- elevation: offset + blur, never a zero-offset halo ---- */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 4px 12px -2px rgba(0, 0, 0, 0.5);
+  --shadow-3: 0 12px 32px -8px rgba(0, 0, 0, 0.6);
+
+  /* ---- motion: one curve, two durations ---- */
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --fast: 120ms;
+  --slow: 240ms;
+}
+
+/* ---- browser surfaces: the parts we did not draw still carry the design ---- */
+::selection {
+  background: var(--select-bg);
+  color: var(--text-1);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-3) transparent;
+}
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--line-2);
+  border-radius: var(--r-pill);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--line-3); background-clip: content-box; }
+
+:root { caret-color: var(--accent); accent-color: var(--accent-solid); }
+
+a { color: var(--accent); text-underline-offset: 3px; text-decoration-thickness: 1px; }
+
+:is(button, a, [tabindex], summary, input, select, textarea):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
