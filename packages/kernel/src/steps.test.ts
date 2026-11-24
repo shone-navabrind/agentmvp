@@ -195,6 +195,38 @@ describe("durable step runtime", () => {
     await close();
   });
 
+  test("a cost guard is not reset by resumption", async () => {
+    // Spend lived in memory per execute(), so a run with maxAttempts N could spend
+    // its cap N times over. The guard has to remember across attempts.
+    const { k, close } = await newKernel();
+    let turns = 0;
+    k.steps.register({
+      kind: "expensive",
+      maxAttempts: 4,
+      async run(ctx) {
+        for (let i = 0; i < 100; i++) {
+          turns++;
+          await ctx.step(`turn-${ctx.attempt}-${i}`, async () => ({ i }));
+          ctx.budget.charge(0.05);
+          ctx.budget.assertUnder(0.2);
+        }
+        return { done: true };
+      },
+    });
+
+    const runId = await k.steps.start("expensive", {}, SCOPE);
+    await k.steps.execute(runId);
+    const afterFirst = turns;
+    assert.equal(afterFirst, 4, "stopped at $0.20 on the first attempt");
+
+    // BudgetExceeded is non-retryable, so the run is already terminal; the point is
+    // that the recorded spend survived rather than resetting to zero.
+    const rec = await k.steps.get(runId);
+    assert.equal(rec!.state, "failed");
+    assert.ok((rec!.spentUsd ?? 0) >= 0.2, `spend persisted, got ${rec!.spentUsd}`);
+    await close();
+  });
+
   test("a loop halts on the cost guard instead of draining the wallet", async () => {
     const { k, close } = await newKernel();
     let iterations = 0;

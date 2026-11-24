@@ -155,6 +155,8 @@ describe("full stack", () => {
     assert.ok(!bp.compose.includes("dev-only"), "secret is not baked into the compose");
     assert.match(bp.compose, /PASSWORD: "\u2022+"/, "it is redacted, not simply absent");
     assert.equal(bp.bindings.inputs.ODOO_DB_NAME, "acme", "non-secrets still render");
+    // Blanking the value must not make a configured secret look unconfigured.
+    assert.equal(bp.inputsSet.DB_PASSWORD, true, "the UI can still say it is set");
   });
 
   test("the blueprint endpoint exposes the catalog and the provisioning plan", async () => {

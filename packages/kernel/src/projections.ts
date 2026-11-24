@@ -27,13 +27,13 @@ export class ProjectionRunner {
     this.#log = log;
   }
 
-  async #checkpoint(p: Projection): Promise<{ version: number; lastEventId: string | null } | null> {
+  async #checkpoint(p: Projection): Promise<{ version: number; cursor: string | null } | null> {
     const r = await this.#db.query<{ version: number; last_event_id: string | null }>(
       `select version, last_event_id from projection_checkpoints where name = $1`,
       [p.name],
     );
     const row = r.rows[0];
-    return row ? { version: row.version, lastEventId: row.last_event_id } : null;
+    return row ? { version: row.version, cursor: row.last_event_id } : null;
   }
 
   /**
@@ -54,12 +54,12 @@ export class ProjectionRunner {
         );
       });
       rebuilt = cp !== null;
-      cp = { version: p.version, lastEventId: null };
+      cp = { version: p.version, cursor: null };
     }
 
     const batch = opts.batch ?? 500;
     let applied = 0;
-    let cursor = cp.lastEventId;
+    let cursor = cp.cursor;
 
     for (;;) {
       const events = await this.#log.readAll({ afterId: cursor, limit: batch, types: p.types });
@@ -70,11 +70,11 @@ export class ProjectionRunner {
         for (const ev of events) await p.apply(tx, ev);
         await tx.query(
           `update projection_checkpoints set last_event_id = $2, updated_at = now() where name = $1`,
-          [p.name, events[events.length - 1].id],
+          [p.name, events[events.length - 1].cursor],
         );
       });
       applied += events.length;
-      cursor = events[events.length - 1].id;
+      cursor = events[events.length - 1].cursor;
       if (events.length < batch) break;
     }
     return { applied, rebuilt };

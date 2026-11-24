@@ -1,8 +1,15 @@
 # Harness Cloud — Architecture v2
 
 > Supersedes the object model, extension model and build order in `BUILD_PROMPT_v1.md`.
-> v1 remains the reference for: baked images, network policy, LiteLLM key topology, the credits ledger,
-> and the prototype lessons (§12 there — still all true).
+>
+> **This document is not self-contained, and that is a defect.** Baked images, network
+> policy, LiteLLM key topology, the credits ledger and the prototype lessons live only in
+> `BUILD_PROMPT_v1.md` (in this repo, alongside this file). A reader without it cannot
+> build §6, §13, §15 or K14. Folding those sections in is tracked work, not a choice.
+>
+> **`pi`** is referred to throughout and defined nowhere here: it is the default coding
+> agent (the "harness") that runs inside a sandbox. Claude Code is the second supported
+> harness. Both are driven through the `HarnessAdapter` contract in §6.
 
 ---
 
@@ -114,6 +121,12 @@ can(subject, "project:terminal:open", { projectId })  // → Decision + reason (
 Capabilities are strings in a closed registry. Roles are named bundles of capabilities. Grants are
 per-subject/per-resource rows. No ad-hoc `if (user.role === 'admin')` anywhere — lint rule enforced.
 
+> **Status: specified and tested, not yet enforced.** The capability layer and its matrix
+> are complete, but no production call site calls `assert()` — the API has no
+> authentication in front of it yet (K0). Until K0 lands, this section describes the
+> intended enforcement, not the current behaviour. `Secrets.get()` is tenant-scoped but
+> takes no subject, so capability checks on secret reads are also still owed.
+
 ### 2.4 Secrets
 Envelope encryption, per-record data keys, pluggable KMS backend *below* a fixed interface.
 Everything else references secrets by URI (`secret://workspace/jira-token`) and resolves at use time,
@@ -134,6 +147,11 @@ into tier 2 "for flexibility" and ending up unable to change anything.
 
 **Tier 0 — Kernel (§2).** Not extensible. Versioned API consumed by everyone else.
 
+> `secrets.backend` is **not** an extension point. An earlier draft listed it as one under
+> the invented label "kernel-adjacent", which made §2.4's promise that plugins never see
+> raw secrets vacuous — a plugin would have *been* the secrets backend. The key-wrapping
+> backend (KMS, Vault, age) is chosen by configuration at boot, not loaded as a plugin.
+
 **Tier 1 — Typed extension points.** In-process TypeScript modules, loaded from a manifest, running with
 the host's trust. First-party and reviewed third-party only.
 
@@ -146,7 +164,7 @@ the host's trust. First-party and reviewed third-party only.
 | `connector.ingress` / `connector.egress` | §10 | jira, slack, linear, s3, kafka, generic-http |
 | `board.view` / `board.automation` | §8 | kanban, table, timeline, "on move → run flow" |
 | `model.gateway` | §6.3 | litellm (default), direct-anthropic, bedrock-only |
-| `auth.provider`, `secrets.backend`, `storage.backend` | kernel-adjacent | oidc/saml, vault/kms/age, s3/fs |
+| `auth.provider`, `storage.backend` | adapters below a fixed interface | oidc/saml, s3/fs |
 | `ui.panel` | §12 | extra project tab, right-rail card, card renderer |
 
 **Tier 2 — Out-of-process plugins.** Untrusted or third-party. Run as a container or worker with a
@@ -398,10 +416,15 @@ cursor pagination, per-subject rate limits, ETags on reads.
 
 ---
 
-## 12. UI implications (answering the screenshot)
+## 12. UI implications
 
-The Claude Code shell you showed is the right *skeleton*, wrong *content* (see the five flaws noted earlier).
-Mapped onto this model:
+The product's reference point is a three-pane developer tool: a left rail for navigation,
+a central work surface, and a right rail of context. That skeleton is right for an
+Operate-mode surface. What a general-purpose coding tool puts in those panes is not:
+it organises by *conversation*, shows model telemetry (context-window use, token counts)
+and assumes one technical user. This product organises by *session* — a durable object
+with a branch, a port range and a lifecycle — shows *project* status, and serves
+non-technical users through the same shell. Mapped onto this model:
 
 - **Left rail:** workspace switcher → project list (with sandbox state dot) → within a project, sessions list.
   "Recents" becomes *sessions*, which are durable objects, not chat scrollback.

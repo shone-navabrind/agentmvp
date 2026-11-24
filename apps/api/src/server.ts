@@ -177,6 +177,11 @@ async function routes(demo: Demo, path: string): Promise<unknown | undefined> {
           ]),
         ),
       },
+      // Whether a secret is set is not itself a secret, and the UI cannot infer it
+      // from a blanked value without reporting a configured password as missing.
+      inputsSet: Object.fromEntries(
+        b.active.inputs.map((i) => [i.key, Boolean((b.bindings.inputs as Record<string, string>)[i.key])]),
+      ),
       ready: b.check.ok,
       missing: b.check.missing,
       previewPort: b.previewPort,

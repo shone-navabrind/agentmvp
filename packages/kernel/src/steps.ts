@@ -40,6 +40,8 @@ export type RunRecord = {
   output: unknown;
   error: unknown;
   attempt: number;
+  /** Cumulative across every attempt. */
+  spentUsd?: number;
 };
 
 export class BudgetExceeded extends KernelError {
@@ -89,7 +91,9 @@ export class StepRuntime {
 
   async get(runId: string): Promise<RunRecord | null> {
     const r = await this.#db.query<RunRecord>(
-      `select id, kind, state, output, error, attempt from flow_runs where id = $1`,
+      `select id, kind, state, output, error, attempt,
+              (spent_micros::float8 / 1e6) as "spentUsd"
+       from flow_runs where id = $1`,
       [runId],
     );
     return r.rows[0] ?? null;
@@ -171,11 +175,12 @@ export class StepRuntime {
       input: unknown;
       attempt: number;
       state: string;
+      spent_micros: string;
       tenant_id: string;
       workspace_id: string;
       project_id: string | null;
     }>(
-      `select kind, input, attempt, state, tenant_id, workspace_id, project_id
+      `select kind, input, attempt, state, spent_micros, tenant_id, workspace_id, project_id
        from flow_runs where id = $1`,
       [runId],
     );
@@ -200,7 +205,8 @@ export class StepRuntime {
       projectId: row.project_id ?? undefined,
     };
     const abort = new AbortController();
-    let spent = 0;
+    // Carried forward from previous attempts, not restarted at zero.
+    let spent = Number(row.spent_micros ?? 0) / 1e6;
     const self = this;
 
     const ctx: StepCtx = {
@@ -212,6 +218,12 @@ export class StepRuntime {
         spentUsd: () => spent,
         charge: (usd: number) => {
           spent += usd;
+          // Persist immediately: a crash between charge and completion must not
+          // hand the next attempt a clean budget.
+          void self.#db.query(`update flow_runs set spent_micros = $2 where id = $1`, [
+            runId,
+            Math.round(spent * 1e6),
+          ]);
         },
         assertUnder: (limit: number) => {
           if (spent >= limit) throw new BudgetExceeded(spent, limit);

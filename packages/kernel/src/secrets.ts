@@ -63,20 +63,24 @@ export class Secrets {
     await this.#db.query(
       `insert into secrets (uri, tenant_id, wrapped_key, iv, tag, ciphertext)
        values ($1,$2,$3,$4,$5,$6)
-       on conflict (uri) do update set wrapped_key=$3, iv=$4, tag=$5, ciphertext=$6`,
+       on conflict (tenant_id, uri) do update set wrapped_key=$3, iv=$4, tag=$5, ciphertext=$6`,
       [uri, tenantId, wrapped, iv, c.getAuthTag(), ct],
     );
   }
 
-  async get(uri: string): Promise<string> {
+  /** Reads are scoped to a tenant. A URI alone is not an identity. */
+  async get(tenantId: string, uri: string): Promise<string> {
     const r = await this.#db.query<{
       wrapped_key: Uint8Array;
       iv: Uint8Array;
       tag: Uint8Array;
       ciphertext: Uint8Array;
-    }>(`select wrapped_key, iv, tag, ciphertext from secrets where uri = $1`, [uri]);
+    }>(
+      `select wrapped_key, iv, tag, ciphertext from secrets where tenant_id = $1 and uri = $2`,
+      [tenantId, uri],
+    );
     const row = r.rows[0];
-    if (!row) throw new KernelError("NO_SUCH_SECRET", `No secret at "${uri}"`, { uri });
+    if (!row) throw new KernelError("NO_SUCH_SECRET", `No secret at "${uri}"`, { uri, tenantId });
     const dataKey = await this.#wrapper.unwrap(Buffer.from(row.wrapped_key));
     const d = createDecipheriv("aes-256-gcm", dataKey, Buffer.from(row.iv));
     d.setAuthTag(Buffer.from(row.tag));
@@ -84,10 +88,10 @@ export class Secrets {
   }
 
   /** Raw stored bytes, for proving the DB holds no plaintext. */
-  async rawRow(uri: string): Promise<string> {
+  async rawRow(tenantId: string, uri: string): Promise<string> {
     const r = await this.#db.query<{ ciphertext: Uint8Array }>(
-      `select ciphertext from secrets where uri = $1`,
-      [uri],
+      `select ciphertext from secrets where tenant_id = $1 and uri = $2`,
+      [tenantId, uri],
     );
     return Buffer.from(r.rows[0].ciphertext).toString("latin1");
   }

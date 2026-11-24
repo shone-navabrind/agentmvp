@@ -166,7 +166,7 @@ describe("user journey (real browser)", () => {
     await page.click('#session-list [data-session="s-perf"]');
     await page.waitForTimeout(350);
 
-    const heading = (await page.textContent(".sec")) ?? "";
+    const heading = (await page.textContent(".page-title")) ?? "";
     assert.match(heading, /Profile the slow query/);
     assert.match(page.url(), /session=s-perf/);
   });

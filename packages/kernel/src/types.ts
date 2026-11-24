@@ -15,6 +15,8 @@ export type Event<P = unknown> = {
   id: string; // ULID, globally monotonic
   stream: string; // "project:<id>" | "session:<id>" | "flowrun:<id>" | ...
   seq: string; // per-stream, gapless, 1-based (string: bigint doesn't survive JSON)
+  /** Commit-order position in the global log. This, not `id`, is the safe read cursor. */
+  cursor: string;
   type: string; // registered in the schema registry
   tenantId: string;
   workspaceId: string;

@@ -117,9 +117,16 @@ describe("event log", () => {
   test("upcasts a superseded payload on read", async () => {
     // Simulate history: a v1 event written before the schema changed.
     await k.db.query(
-      `insert into events (id, stream, seq, type, tenant_id, workspace_id, project_id,
+      `with nextord as (
+         insert into streams (stream, next_seq) values ('__global__', 2)
+         on conflict (stream) do update set next_seq = streams.next_seq + 1
+         returning next_seq
+       )
+       insert into events (id, ordinal, stream, seq, type, tenant_id, workspace_id, project_id,
                            actor, at, payload)
-       values ($1,'project:old',1,'task.moved.v1','t1','ws1','p1',$2,now(),$3)`,
+       values ($1,
+               (select next_seq - 1 from nextord),
+               'project:old',1,'task.moved.v1','t1','ws1','p1',$2,now(),$3)`,
       [ulid(), JSON.stringify(USER), JSON.stringify({ taskId: "T1", to: "done" })],
     );
     await k.db.query(`insert into streams (stream, next_seq) values ('project:old', 2)`);
@@ -151,6 +158,64 @@ describe("event log", () => {
       [root.id],
     );
     assert.equal(Number(r.rows[0].n), 1);
+  });
+});
+
+describe("the read cursor must not skip a committed event", () => {
+  test("cursor is commit order, so a slow transaction is never stepped over", async () => {
+    const mem = await openMemoryDb();
+    const k = await createKernel(mem.db, { ephemeralSecrets: true });
+    defineBoardEvents(k.registry);
+
+    for (let i = 0; i < 12; i++) {
+      await k.log.append({
+        ...SCOPE,
+        stream: `project:p${i % 3}`,
+        type: "task.created",
+        payload: { taskId: `C${i}`, title: `c${i}`, state: "todo" },
+        actor: USER,
+      });
+    }
+
+    // Walk the log the way a projection does, two at a time, and prove nothing is
+    // skipped and nothing is seen twice.
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (;;) {
+      const page: Awaited<ReturnType<typeof k.log.readAll>> = await k.log.readAll({
+        afterId: cursor,
+        limit: 2,
+      });
+      if (page.length === 0) break;
+      seen.push(...page.map((e) => e.id));
+      cursor = page[page.length - 1].cursor;
+    }
+
+    assert.equal(seen.length, 12, "every committed event was read exactly once");
+    assert.equal(new Set(seen).size, 12, "no duplicates");
+    await mem.close();
+  });
+
+  test("ordinals are dense and strictly increasing", async () => {
+    const mem = await openMemoryDb();
+    const k = await createKernel(mem.db, { ephemeralSecrets: true });
+    defineBoardEvents(k.registry);
+    await Promise.all(
+      Array.from({ length: 20 }, (_, i) =>
+        k.log.append({
+          ...SCOPE,
+          stream: `project:x${i % 4}`,
+          type: "task.created",
+          payload: { taskId: `P${i}`, title: "p", state: "todo" },
+          actor: USER,
+        }),
+      ),
+    );
+    const all = await k.log.readAll({ limit: 100 });
+    const cursors = all.map((e) => Number(e.cursor));
+    assert.deepEqual(cursors, [...cursors].sort((a, b) => a - b), "strictly ordered");
+    assert.equal(new Set(cursors).size, 20, "no two events share an ordinal");
+    await mem.close();
   });
 });
 

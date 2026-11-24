@@ -14,7 +14,7 @@ function globToRegExp(glob: string): RegExp {
 }
 
 type Row = {
-  id: string; stream: string; seq: string | number | bigint; type: string;
+  id: string; ordinal: string | number | bigint; stream: string; seq: string | number | bigint; type: string;
   tenant_id: string; workspace_id: string; project_id: string | null;
   actor: unknown; at: Date | string; payload: unknown;
   idem_key: string | null; causation_id: string | null; correlation_id: string | null;
@@ -42,6 +42,7 @@ export class EventLog {
       id: row.id,
       stream: row.stream,
       seq: String(row.seq),
+      cursor: String(row.ordinal),
       type,
       tenantId: row.tenant_id,
       workspaceId: row.workspace_id,
@@ -81,16 +82,25 @@ export class EventLog {
       );
       const seq = seqRes.rows[0].seq;
 
+      // Global ordinal, same serialization trick as the per-stream counter. The row
+      // lock is held until commit, so ordinals come out in commit order.
+      const ordRes = await q.query<{ ord: string }>(
+        `insert into streams (stream, next_seq) values ('__global__', 2)
+         on conflict (stream) do update set next_seq = streams.next_seq + 1
+         returning (streams.next_seq - 1)::text as ord`,
+      );
+      const ordinal = ordRes.rows[0].ord;
+
       const id = ulid();
       const at = input.at ?? new Date().toISOString();
       let inserted;
       try {
         inserted = await q.query<Row>(
-          `insert into events (id, stream, seq, type, tenant_id, workspace_id, project_id,
+          `insert into events (id, ordinal, stream, seq, type, tenant_id, workspace_id, project_id,
                                actor, at, payload, idem_key, causation_id, correlation_id)
-           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) returning *`,
+           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) returning *`,
           [
-            id, input.stream, seq, input.type, input.tenantId, input.workspaceId,
+            id, ordinal, input.stream, seq, input.type, input.tenantId, input.workspaceId,
             input.projectId ?? null, JSON.stringify(input.actor), at, JSON.stringify(payload),
             input.idemKey ?? null, input.causationId ?? null, input.correlationId ?? null,
           ],
@@ -123,16 +133,19 @@ export class EventLog {
     return res.rows.map((r) => this.#hydrate(r));
   }
 
-  /** Global cursor read. `afterId` is a ULID, so this is a stable, gapless cursor. */
+  /**
+   * Global cursor read, ordered by commit-order ordinal. Callers pass the `cursor`
+   * from the last event they processed.
+   */
   async readAll(opts: { afterId?: string | null; limit?: number; types?: string[] } = {}): Promise<Event[]> {
-    const params: unknown[] = [opts.afterId ?? "", opts.limit ?? 1000];
+    const params: unknown[] = [opts.afterId ?? "0", opts.limit ?? 1000];
     let typeClause = "";
     if (opts.types?.length) {
       params.push(opts.types);
       typeClause = ` and type = any($3)`;
     }
     const res = await this.#db.query<Row>(
-      `select * from events where id > $1${typeClause} order by id asc limit $2`,
+      `select * from events where ordinal > $1::bigint${typeClause} order by ordinal asc limit $2`,
       params,
     );
     return res.rows.map((r) => this.#hydrate(r));

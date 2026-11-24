@@ -1,6 +1,6 @@
 # Build status
 
-Against the milestones in `ARCHITECTURE.md` §16. **239 tests, 11 packages, 0 failures**,
+Against the milestones in `ARCHITECTURE.md` §16. **267 tests, 13 packages, 0 failures**,
 no external services — PGlite gives every test a real Postgres 17 in-process.
 
 ```bash

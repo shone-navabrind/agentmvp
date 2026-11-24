@@ -12,6 +12,12 @@ create table if not exists streams (
 
 create table if not exists events (
   id              text primary key,
+  -- Assigned from a serialized counter INSIDE the append transaction, so ordinals are
+  -- handed out in commit order. The ULID cannot be the cursor: it is minted before
+  -- commit, so a transaction holding a lower ULID can commit after a reader has already
+  -- advanced past it, and that event is then never projected.
+  -- Cost: every append contends on one counter row. Accepted for correctness.
+  ordinal         bigint not null,
   stream          text not null,
   seq             bigint not null,
   type            text not null,
@@ -30,6 +36,7 @@ create unique index if not exists events_idem on events (stream, idem_key) where
 create index if not exists events_type on events (type);
 create index if not exists events_scope on events (tenant_id, workspace_id, project_id);
 create index if not exists events_correlation on events (correlation_id);
+create unique index if not exists events_ordinal on events (ordinal);
 
 create table if not exists outbox (
   id               bigserial primary key,
@@ -60,6 +67,9 @@ create table if not exists flow_runs (
   output        jsonb,
   error         jsonb,
   attempt       int not null default 0,
+  -- Cumulative, so a cost guard survives resumption. In memory it reset on every
+  -- attempt, letting a maxCostUsd-guarded loop spend its cap once per attempt.
+  spent_micros  bigint not null default 0,
   lease_until   timestamptz,
   created_at    timestamptz not null default now(),
   ended_at      timestamptz
@@ -78,13 +88,16 @@ create table if not exists flow_steps (
 );
 
 create table if not exists secrets (
-  uri           text primary key,
+  -- Keyed by tenant AND uri. With uri alone, two tenants using the documented
+  -- secret://workspace/... shape collide: one overwrites the other and either can read it.
   tenant_id     text not null,
+  uri           text not null,
   wrapped_key   bytea not null,
   iv            bytea not null,
   tag           bytea not null,
   ciphertext    bytea not null,
-  created_at    timestamptz not null default now()
+  created_at    timestamptz not null default now(),
+  primary key (tenant_id, uri)
 );
 `;
 

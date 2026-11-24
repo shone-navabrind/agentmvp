@@ -159,10 +159,8 @@ function renderRail() {
         <span class="dot ${s.state}" aria-hidden="true"></span>
         <span class="item-main">
           <span class="item-title">${esc(s.title)}</span>
-          <span class="item-sub">${
-            guided()
-              ? esc(friendlyState(s.state))
-              : `<span translate="no">${esc(s.branch)}</span> · :${s.portRange.from}`
+          <span class="item-sub${guided() ? "" : " code"}" translate="no">${
+            guided() ? esc(friendlyState(s.state)) : `${esc(s.branch)} · :${s.portRange.from}`
           }</span>
         </span>
         <span class="sr-only">, ${esc(s.state)}</span>
@@ -236,7 +234,7 @@ function viewSetup(d) {
   const g = guided();
 
   const gets = bp.active.whatYouGet
-    .map((l) => `<li>${icon("check")}<span>${esc(l)}</span></li>`)
+    .map((l) => `<li>${icon("check", { size: 17 })}<span>${esc(l)}</span></li>`)
     .join("");
 
   const needs = bp.catalog.find((c) => c.id === bp.active.id)?.needs ?? { repos: [], seeds: [], inputs: [] };
@@ -269,7 +267,16 @@ function viewSetup(d) {
     )
     .join("");
   const inputSlots = needs.inputs
-    .map((i) => slot("shield", i.label, i.hint, Boolean(bp.bindings.inputs[i.key]), i.secret ? "Set" : esc(bp.bindings.inputs[i.key] ?? "")))
+    .map((i) =>
+      slot(
+        "shield",
+        i.label,
+        i.hint,
+        // A secret's value never reaches the browser, so ask the API whether it is set.
+        bp.inputsSet?.[i.key] ?? Boolean(bp.bindings.inputs[i.key]),
+        i.secret ? "Set" : (bp.bindings.inputs[i.key] ?? ""),
+      ),
+    )
     .join("");
 
   const steps = bp.steps
@@ -294,8 +301,8 @@ function viewSetup(d) {
     .join("");
 
   return `<div class="wrap-wide">
-    <h2 class="sec">${esc(g ? "Your starting point" : bp.active.name)}</h2>
-    <p class="sec-note">${esc(
+    <h1 class="page-title">${esc(g ? "Your starting point" : bp.active.name)}</h1>
+    <p class="page-sub">${esc(
       g
         ? "We set this up for you already. Nothing here needs you to know how it works."
         : bp.active.summary,
@@ -311,20 +318,20 @@ function viewSetup(d) {
       <ul class="gets">${gets}</ul>
     </div>
 
-    <h3 class="sub">${esc(g ? "What we used" : "Bindings")}</h3>
+    <h2 class="sub">${esc(g ? "What we used" : "Bindings")}</h2>
     <div class="slots">${repoSlots}${seedSlots}${g ? "" : inputSlots}</div>
 
-    <h3 class="sub">${esc(g ? "How it was set up" : "Provisioning plan")}</h3>
+    <h2 class="sub">${esc(g ? "How it was set up" : "Provisioning plan")}</h2>
     <div class="timeline">${steps}</div>
 
     ${
       g
         ? ""
-        : `<h3 class="sub">Generated compose</h3>
+        : `<h2 class="sub">Generated compose</h2>
            <pre class="well">${esc(bp.compose.trim())}</pre>`
     }
 
-    <h3 class="sub">${esc(g ? "Other things we can set up" : "Other blueprints")}</h3>
+    <h2 class="sub">${esc(g ? "Other things we can set up" : "Other blueprints")}</h2>
     <div class="bp-grid">
       ${others}
       <button class="bp">
@@ -367,7 +374,8 @@ function viewChat(d) {
     .join("");
 
   return `<div class="wrap">
-    <h2 class="sec">${esc(d.chat.title)}</h2>
+    <h1 class="page-title">${esc(d.chat.title)}</h1>
+    <p class="page-sub">${esc(g ? "Ask for what you need. The assistant works on its own copy." : `Session ${state.session} on ${d.project.model}.`)}</p>
     ${body}
     <div class="composer">
       <span>${esc(g ? "Tell the assistant what you need…" : "Reply to pi…")}</span>
@@ -388,14 +396,14 @@ function viewBoard(d) {
     .map((k) => {
       const cards = d.board.columns[k] ?? [];
       return `<div>
-        <h3 class="col-head"><span>${esc(names[k])}</span><span>${cards.length}</span></h3>
+        <h2 class="col-head"><span>${esc(names[k])}</span><span class="n">${cards.length}</span></h2>
         ${cards.map(card).join("") || `<p class="empty-col">Nothing here</p>`}
       </div>`;
     })
     .join("");
   return `<div class="wrap-wide">
-    <h2 class="sec">${esc(guided() ? "Tasks" : "Board")}</h2>
-    <p class="sec-note">${esc(
+    <h1 class="page-title">${esc(guided() ? "Tasks" : "Board")}</h1>
+    <p class="page-sub">${esc(
       guided()
         ? "Anything in “Needs you” is waiting on a decision only you can make."
         : "A projection of the event log. Blocked cards were raised automatically by paused or failed runs.",
@@ -450,8 +458,8 @@ function viewFlows(d) {
     })
     .join("");
   return `<div class="wrap-wide">
-    <h2 class="sec">Flow runs</h2>
-    <p class="sec-note">Every node runs on the durable step runtime, so a run killed mid-flight resumes from exactly where it stopped and produces identical output.</p>
+    <h1 class="page-title">Flow runs</h1>
+    <p class="page-sub">Every node runs on the durable step runtime, so a run killed mid-flight resumes from exactly where it stopped and produces identical output.</p>
     ${runs}
   </div>`;
 }
@@ -483,8 +491,8 @@ function viewTriggers(d) {
     )
     .join("");
   return `<div class="wrap-wide">
-    <h2 class="sec">Triggers</h2>
-    <p class="sec-note">Events, schedules, inbound webhooks and repository activity all start the same kind of job, so they share concurrency rules, rate limits and a dead-letter queue.</p>
+    <h1 class="page-title">Triggers</h1>
+    <p class="page-sub">Events, schedules, inbound webhooks and repository activity all start the same kind of job, so they share concurrency rules, rate limits and a dead-letter queue.</p>
     <table><thead><tr><th>Name</th><th>Source</th><th>Runs</th><th>Overlap</th><th>State</th><th>Fired</th></tr></thead>
     <tbody>${rows}</tbody></table>
   </div>`;
@@ -516,14 +524,14 @@ function viewRepos(d) {
     )
     .join("");
   return `<div class="wrap-wide">
-    <h2 class="sec">${esc(g ? "Your code" : "Repositories")}</h2>
-    <p class="sec-note">${esc(
+    <h1 class="page-title">${esc(g ? "Your code" : "Repositories")}</h1>
+    <p class="page-sub">${esc(
       g
         ? "Each task works on its own copy, so nothing anyone else is doing can break your work."
         : "One bare clone per repo, one worktree per session. Promotion to the main branch is always explicit.",
     )}</p>
     <table><thead><tr><th>Name</th><th>Remote</th><th>Default branch</th></tr></thead><tbody>${rows}</tbody></table>
-    <h3 class="sub">${esc(g ? "What each task is working on" : "Session worktrees")}</h3>
+    <h2 class="sub">${esc(g ? "What each task is working on" : "Session worktrees")}</h2>
     <table><thead><tr><th>${esc(W().session)}</th><th>Branch</th><th>State</th></tr></thead><tbody>${wt}</tbody></table>
   </div>`;
 }
@@ -532,8 +540,8 @@ function viewRepos(d) {
 function viewTerminal(d) {
   const sess = d.sessions.find((s) => s.id === state.session) ?? d.sessions[0];
   return `<div class="wrap-wide">
-    <h2 class="sec">Terminal · ${esc(sess.title)}</h2>
-    <p class="sec-note">Requires the <span class="mono">project:terminal:open</span> capability, granted per user per project. Every session is recorded and audited.</p>
+    <h1 class="page-title">Terminal</h1>
+    <p class="page-sub">Requires the <span class="mono">project:terminal:open</span> capability, granted per user per project. Every session is recorded and audited.</p>
     <pre class="well"><span class="prompt">root@${esc(d.project.sandbox.id)}:/work/${esc(sess.id)}/addons$</span> git status --short
  M models/sale_order.py
  M views/sale_view.xml
@@ -560,8 +568,8 @@ function viewPlugins(d) {
     )
     .join("");
   return `<div class="wrap-wide">
-    <h2 class="sec">Plugins</h2>
-    <p class="sec-note">Capabilities are declared in the manifest and enforced at every call. Untrusted plugins never run in the API process, and one that keeps failing is circuit-broken rather than retried.</p>
+    <h1 class="page-title">Plugins</h1>
+    <p class="page-sub">Capabilities are declared in the manifest and enforced at every call. Untrusted plugins never run in the API process, and one that keeps failing is circuit-broken rather than retried.</p>
     <table><thead><tr><th>Plugin</th><th>Trust</th><th>Capabilities</th><th>State</th></tr></thead><tbody>${rows}</tbody></table>
   </div>`;
 }
@@ -579,7 +587,7 @@ function viewBilling(d) {
     )
     .join("");
   return `<div class="wrap-wide">
-    <h2 class="sec">${esc(W().spend)}</h2>
+    <h1 class="page-title">${esc(W().spend)}</h1>
     <div class="panel">
       <div class="stat-row"><span class="stat-k">Granted</span><span class="stat-v">${money.format(b.granted)}</span></div>
       <div class="stat-row"><span class="stat-k">Spent</span><span class="stat-v">${usd(spent)}</span></div>
@@ -588,7 +596,7 @@ function viewBilling(d) {
       <div class="stat-row"><span class="stat-k">Ledger drift</span>
         <span class="stat-v ${b.reconcile.drift === 0 ? "ok-text" : "err-text"}">${b.reconcile.drift}</span></div>
     </div>
-    <h3 class="sub">Ledger</h3>
+    <h2 class="sub">Ledger</h2>
     <table><thead><tr><th>Kind</th><th>Project</th><th>Amount</th><th>Billing</th></tr></thead><tbody>${entries}</tbody></table>
   </div>`;
 }
@@ -600,23 +608,26 @@ function renderStatus() {
   const b = d.billing;
   const g = guided();
   const sess = d.sessions.find((s) => s.id === state.session);
+  const remaining = Number(b.balanceMicros) / 1e6;
   const spentPct = Math.round(((b.granted * 1e6 - Number(b.balanceMicros)) / (b.granted * 1e6)) * 100);
+  const capPct = (p.capacity.activeSessions / p.capacity.maxSessions) * 100;
 
+  // Each group leads with the one number that answers its question, then supports it.
   const machine = g
-    ? `<div class="stat-row"><span class="stat-k">State</span><span class="stat-v ok-text">Ready</span></div>
-       <div class="stat-row"><span class="stat-k">Running</span><span class="stat-v">${esc(d.blueprints.active.name)}</span></div>`
-    : `<div class="stat-row"><span class="stat-k">State</span><span class="stat-v ok-text">${esc(p.sandbox.state)}</span></div>
+    ? `<div class="figure"><span class="n ok-text">Ready</span></div>
+       <div class="figure-note">${esc(d.blueprints.active.name)}</div>`
+    : `<div class="figure"><span class="n">${p.sandbox.size.vcpu}</span><span class="unit">vCPU</span>
+         <span class="n">${(p.sandbox.size.memMiB / 1024).toFixed(0)}</span><span class="unit">GiB</span></div>
+       <div class="figure-note">${esc(p.sandbox.state)} · ${esc(p.sandbox.isolation)} isolation</div>
        <div class="stat-row"><span class="stat-k">Blueprint</span><span class="stat-v">${esc(d.blueprints.active.id)}</span></div>
-       <div class="stat-row"><span class="stat-k">Driver</span><span class="stat-v">${esc(p.sandbox.driver)}</span></div>
-       <div class="stat-row"><span class="stat-k">Isolation</span><span class="stat-v">${esc(p.sandbox.isolation)}</span></div>
-       <div class="stat-row"><span class="stat-k">Size</span><span class="stat-v">${p.sandbox.size.vcpu} vCPU · ${p.sandbox.size.memMiB} MiB</span></div>`;
+       <div class="stat-row"><span class="stat-k">Driver</span><span class="stat-v">${esc(p.sandbox.driver)}</span></div>`;
 
   const sessionBlock =
     sess && !g
       ? `<div class="stat-group">
           <div class="stat-head">This ${esc(W().session.toLowerCase())}</div>
           <div class="stat-row"><span class="stat-k">Branch</span><span class="stat-v">${esc(sess.branch)}</span></div>
-          <div class="stat-row"><span class="stat-k">Ports</span><span class="stat-v">${sess.portRange.from}–${sess.portRange.to}</span></div>
+          <div class="stat-row"><span class="stat-k">Ports</span><span class="stat-v">${sess.portRange.from}\u2013${sess.portRange.to}</span></div>
           <div class="stat-row"><span class="stat-k">Memory cap</span><span class="stat-v">${sess.memMiB} MiB</span></div>
         </div>`
       : "";
@@ -625,7 +636,7 @@ function renderStatus() {
     ? ""
     : `<div class="stat-group">
         <div class="stat-head">Recent events</div>
-        ${d.events.slice(0, 8).map((e) => `<div class="evt"><span class="evt-seq">${esc(e.seq)}</span><span class="evt-type" translate="no">${esc(e.type)}</span></div>`).join("")}
+        ${d.events.slice(0, 7).map((e) => `<div class="evt"><span class="evt-seq">${esc(e.seq)}</span><span class="evt-type" translate="no">${esc(e.type)}</span></div>`).join("")}
       </div>`;
 
   $("status").innerHTML = `
@@ -635,19 +646,24 @@ function renderStatus() {
     </div>
 
     <div class="stat-group">
-      <div class="stat-head">${esc(g ? "Capacity" : "Sessions")}</div>
-      <div class="stat-row"><span class="stat-k">${esc(g ? "Tasks running" : "Active")}</span>
-        <span class="stat-v">${p.capacity.activeSessions} / ${p.capacity.maxSessions}</span></div>
-      <div class="meter ok"><i style="width:${(p.capacity.activeSessions / p.capacity.maxSessions) * 100}%"></i></div>
+      <div class="stat-head">${esc(g ? "Work in progress" : "Sessions")}</div>
+      <div class="figure">
+        <span class="n">${p.capacity.activeSessions}</span>
+        <span class="unit">of ${p.capacity.maxSessions} running</span>
+      </div>
+      <div class="meter ok"><i style="width:${capPct}%"></i></div>
+      ${g ? "" : `<div class="stat-row"><span class="stat-k">Warm pool</span><span class="stat-v">${p.capacity.warmPool}</span></div>`}
     </div>
 
     ${sessionBlock}
 
     <div class="stat-group">
       <div class="stat-head">${esc(W().spend)}</div>
-      <div class="stat-row"><span class="stat-k">Remaining</span><span class="stat-v">${usd(b.balanceMicros)}</span></div>
+      <div class="figure">
+        <span class="n">${money.format(remaining)}</span>
+      </div>
+      <div class="figure-note">left of ${money.format(b.granted)}</div>
       <div class="meter ${spentPct < 80 ? "ok" : ""}"><i style="width:${Math.min(100, spentPct)}%"></i></div>
-      <div class="stat-row"><span class="stat-k">of ${money.format(b.granted)}</span><span class="stat-v">${spentPct}% used</span></div>
     </div>
 
     ${eventsBlock}`;

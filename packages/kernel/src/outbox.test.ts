@@ -130,6 +130,33 @@ describe("transactional outbox", () => {
   });
 });
 
+describe("secrets: tenant isolation", () => {
+  test("two tenants using the same URI do not collide", async () => {
+    // Keyed by uri alone, one tenant's put overwrote the other's and either could
+    // read it. The documented secret://workspace/... shape makes that collision likely.
+    const mem = await openMemoryDb();
+    const k = await createKernel(mem.db, { ephemeralSecrets: true });
+
+    await k.secrets.put("secret://workspace/api-key", "tenant-a", "a-value");
+    await k.secrets.put("secret://workspace/api-key", "tenant-b", "b-value");
+
+    assert.equal(await k.secrets.get("tenant-a", "secret://workspace/api-key"), "a-value");
+    assert.equal(await k.secrets.get("tenant-b", "secret://workspace/api-key"), "b-value");
+    await mem.close();
+  });
+
+  test("a tenant cannot read another tenant's secret", async () => {
+    const mem = await openMemoryDb();
+    const k = await createKernel(mem.db, { ephemeralSecrets: true });
+    await k.secrets.put("secret://workspace/only-a", "tenant-a", "a-value");
+    await assert.rejects(
+      () => k.secrets.get("tenant-b", "secret://workspace/only-a"),
+      /NO_SUCH_SECRET|No secret at/,
+    );
+    await mem.close();
+  });
+});
+
 describe("secrets: key management", () => {
   test("createKernel REFUSES to invent a master key", async () => {
     // A per-boot key silently makes every stored secret unreadable after a restart.
@@ -143,7 +170,7 @@ describe("secrets: key management", () => {
     const mem = await openMemoryDb();
     const k = await createKernel(mem.db, { ephemeralSecrets: true });
     await k.secrets.put("secret://ws1/x", "t1", "value");
-    assert.equal(await k.secrets.get("secret://ws1/x"), "value");
+    assert.equal(await k.secrets.get("t1", "secret://ws1/x"), "value");
     await mem.close();
   });
 });
@@ -155,8 +182,8 @@ describe("secrets", () => {
     const value = "sk-ant-super-secret-value-12345";
     await k.secrets.put("secret://ws1/anthropic", "t1", value);
 
-    assert.equal(await k.secrets.get("secret://ws1/anthropic"), value);
-    const raw = await k.secrets.rawRow("secret://ws1/anthropic");
+    assert.equal(await k.secrets.get("t1", "secret://ws1/anthropic"), value);
+    const raw = await k.secrets.rawRow("t1", "secret://ws1/anthropic");
     assert.ok(!raw.includes("sk-ant"), "the database alone leaks nothing");
     await mem.close();
   });
@@ -185,7 +212,7 @@ describe("secrets", () => {
     await mem.db.query(`update secrets set ciphertext = $1 where uri = 'secret://ws1/t'`, [
       Buffer.from("tampered-bytes!!"),
     ]);
-    await assert.rejects(() => k.secrets.get("secret://ws1/t"));
+    await assert.rejects(() => k.secrets.get("t1", "secret://ws1/t"));
     await mem.close();
   });
 
@@ -216,7 +243,7 @@ describe("secrets", () => {
       "the payload was never re-encrypted",
     );
     const rotated = new Secrets(mem.db, newKey);
-    assert.equal(await rotated.get("secret://ws1/r"), "value-to-keep");
+    assert.equal(await rotated.get("t1", "secret://ws1/r"), "value-to-keep");
     await mem.close();
   });
 });

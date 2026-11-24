@@ -1,106 +1,103 @@
 /*
  * Harness Cloud — design tokens
  *
- * Mode: Operate. People live in this all day, so ambition shows as precision and
- * restraint. One accent, a 4px rhythm, obvious type steps, and elevation declared
- * exactly once (border OR shadow, never both).
+ * Mode: Operate. People live in this all day, so ambition is precision, not expression.
  *
- * Every foreground token clears WCAG AA 4.5:1 against --surface-3, the lightest
- * background in the system. apps/api/src/a11y.test.ts fails the build otherwise.
+ * The one measured decision this system is built on: on a dark ground, adjacent
+ * surfaces can only separate by about 1.12:1 before they stop reading as dark at all,
+ * while a hairline separates at 1.41:1. So structure is carried by rules and space,
+ * not by stacking greys. Two surfaces, three line weights, and generous gaps.
+ *
+ * Every foreground token clears WCAG AA 4.5:1 on --overlay, the lightest ground text
+ * ever sits on. apps/api/src/a11y.test.ts fails the build otherwise.
  */
 
 :root {
   color-scheme: dark;
 
-  /* ---- surfaces: four steps, each a real elevation, not a shade ---- */
-  --surface-0: #0b0c0e; /* app background */
-  --surface-1: #121316; /* rails, chrome */
-  --surface-2: #17191d; /* panels, cards */
-  --surface-3: #1e2126; /* raised: hover, inputs, selected */
-  --surface-inset: #0e0f11; /* wells: code, terminal */
+  /* ---- grounds: two, plus one for hover and inputs ---- */
+  --base: #08080a;
+  --raised: #17171c;
+  --overlay: #24242b;
+  --well: #050506; /* code, terminal: recessed, not raised */
 
-  /* ---- lines: hairline, divider, strong ---- */
-  --line-1: #23262b;
-  --line-2: #2d3137;
-  --line-3: #3a3f47;
+  /* ---- rules do the structural work ---- */
+  --hair: #232329;   /* inside a group */
+  --line: #32323b;   /* between groups — 1.41:1 on raised */
+  --strong: #44444f; /* a real edge */
 
   /* ---- text ---- */
-  --text-1: #edeef0; /* 13.1:1 on surface-3 */
-  --text-2: #a4aab2; /* 6.4:1  — secondary */
-  --text-3: #8c939b; /* 4.9:1  — tertiary, the floor for body text */
+  --text-1: #f4f4f6; /* 14.0:1 on overlay */
+  --text-2: #b2b2bd; /*  7.3:1 */
+  --text-3: #9696a4; /*  5.3:1 — the floor */
 
-  /* ---- one accent, three roles ---- */
-  --accent: #e0825f; /* text and strokes on dark: 5.2:1 */
-  --accent-solid: #b9552f; /* fills behind white text: 4.6:1 */
-  --accent-wash: #241a16; /* tinted surface */
+  /* ---- one accent, used for state rather than decoration ---- */
+  --accent: #f0845c;
+  --accent-solid: #c0522a; /* white text clears 4.69:1 */
+  --accent-ink: #1a0d07;   /* on --accent: 7.4:1 */
+  --accent-wash: #241611;
 
-  /* ---- status: hue carries meaning, all AA ---- */
-  --ok: #58a87a;
-  --ok-wash: #16241c;
-  --warn: #cfa94a;
-  --warn-wash: #262014;
-  --danger: #dd7a6e;
-  --danger-wash: #2a1a18;
-  --info: #6f9ad6;
-  --info-wash: #161f2a;
+  --ok: #5ec08a;
+  --ok-wash: #11241a;
+  --warn: #d9b155;
+  --warn-wash: #241d0f;
+  --danger: #ec8277;
+  --danger-wash: #261412;
+  --info: #7ba6e8;
+  --info-wash: #121a28;
 
   --focus: #8ab4f8;
-  --select-bg: #2b3a52;
+  --select-bg: #2d3a52;
 
   /* ---- 4px rhythm ---- */
   --s1: 4px;  --s2: 8px;  --s3: 12px; --s4: 16px;
-  --s5: 24px; --s6: 32px; --s7: 48px; --s8: 64px;
+  --s5: 20px; --s6: 28px; --s7: 40px; --s8: 64px;
 
-  /* ---- radii: 6 for controls, 10 for cards; pills only on small controls ---- */
+  /* ---- radii ---- */
   --r-sm: 6px;
   --r-md: 10px;
+  --r-lg: 14px;
   --r-pill: 999px;
 
-  /* ---- type: obvious steps, tight tracking, never below -0.04em ---- */
+  /* ---- type: real jumps, so the eye has somewhere to land ---- */
   --font: "Inter", ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
   --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
-  --t-display: 28px;
-  --t-title: 19px;
-  --t-head: 15px;
+  --t-hero: 30px;   /* page title */
+  --t-figure: 25px; /* a number that matters */
+  --t-title: 17px;
+  --t-head: 14px;
   --t-body: 13.5px;
   --t-small: 12.5px;
   --t-micro: 11px;
 
-  --tracking-display: -0.025em;
-  --tracking-title: -0.02em;
-  --tracking-label: 0.06em;
+  --tk-hero: -0.03em;
+  --tk-title: -0.02em;
+  --tk-label: 0.07em;
 
-  /* ---- elevation: offset + blur, never a zero-offset halo ---- */
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-2: 0 4px 12px -2px rgba(0, 0, 0, 0.5);
-  --shadow-3: 0 12px 32px -8px rgba(0, 0, 0, 0.6);
+  /* ---- elevation: offset and blur, never a zero-offset halo ---- */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-2: 0 6px 20px -6px rgba(0, 0, 0, 0.7);
 
-  /* ---- motion: one curve, two durations ---- */
+  /* ---- motion ---- */
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
-  --fast: 120ms;
-  --slow: 240ms;
+  --fast: 110ms;
+  --slow: 260ms;
 }
 
 /* ---- browser surfaces: the parts we did not draw still carry the design ---- */
-::selection {
-  background: var(--select-bg);
-  color: var(--text-1);
-}
+::selection { background: var(--select-bg); color: var(--text-1); }
 
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--line-3) transparent;
-}
-*::-webkit-scrollbar { width: 10px; height: 10px; }
+* { scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+*::-webkit-scrollbar { width: 11px; height: 11px; }
 *::-webkit-scrollbar-track { background: transparent; }
 *::-webkit-scrollbar-thumb {
-  background: var(--line-2);
+  background: var(--line);
   border-radius: var(--r-pill);
-  border: 2px solid transparent;
+  border: 3px solid transparent;
   background-clip: content-box;
 }
-*::-webkit-scrollbar-thumb:hover { background: var(--line-3); background-clip: content-box; }
+*::-webkit-scrollbar-thumb:hover { background: var(--strong); background-clip: content-box; }
 
 :root { caret-color: var(--accent); accent-color: var(--accent-solid); }
 

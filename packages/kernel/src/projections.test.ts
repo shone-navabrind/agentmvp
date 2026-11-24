@@ -31,9 +31,16 @@ describe("projections", () => {
 
     // A pre-migration event sitting in history.
     await k.db.query(
-      `insert into events (id, stream, seq, type, tenant_id, workspace_id, project_id,
+      `with nextord as (
+         insert into streams (stream, next_seq) values ('__global__', 2)
+         on conflict (stream) do update set next_seq = streams.next_seq + 1
+         returning next_seq
+       )
+       insert into events (id, ordinal, stream, seq, type, tenant_id, workspace_id, project_id,
                            actor, at, payload)
-       values ($1,'project:p1',$2,'task.moved.v1','t1','ws1','p1',$3,now(),$4)`,
+       values ($1,
+               (select next_seq - 1 from nextord),
+               'project:p1',$2,'task.moved.v1','t1','ws1','p1',$3,now(),$4)`,
       [ulid(), 9, JSON.stringify(USER), JSON.stringify({ taskId: "T3", to: "done" })],
     );
     await k.db.query(`update streams set next_seq = 10 where stream = 'project:p1'`);

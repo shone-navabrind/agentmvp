@@ -12,7 +12,7 @@ flow runtime, triggers, plugins and metered model spend built on one event log.
 
 ```bash
 npm install
-npm test        # 239 tests, 11 packages, no external services
+npm test        # 267 tests, 13 packages, no external services
 npm start       # http://localhost:8787
 ```
 
