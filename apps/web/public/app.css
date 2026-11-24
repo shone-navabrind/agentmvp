@@ -62,11 +62,17 @@ html, body {
   line-height: 1.2;
 }
 .ws-switch {
-  background: none; border: 0; padding: 0; cursor: pointer;
+  /* WCAG 2.2 2.5.8 wants a 24px target; the label is only 17px tall, so the
+     button is padded out to reach it without changing how it looks. */
+  background: none; border: 0; cursor: pointer;
+  margin: -3px calc(var(--s1) * -1);
+  padding: 3px var(--s1); min-height: 24px;
   color: var(--text-3); font: inherit; font-size: var(--t-micro);
   display: flex; align-items: center; gap: var(--s1);
-  transition: color var(--fast) var(--ease);
+  border-radius: 4px;
+  transition: color var(--fast) var(--ease), background var(--fast) var(--ease);
 }
+.ws-switch:hover { background: var(--surface-2); }
 .ws-switch:hover { color: var(--text-1); }
 
 .rail-section {

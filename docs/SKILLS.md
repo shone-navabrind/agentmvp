@@ -34,13 +34,24 @@ Both `.agents/skills/` and `.claude/skills/` are git-ignored — 77 MB across 3,
 | Context7 MCP | hosted MCP | `.mcp.json` |
 | Playwright MCP | `@playwright/mcp` | `.mcp.json` |
 
-**415 skills total.** ECC alone is 329 of them — that is the honest cost of installing a
+**1386 skills total.** ECC alone is 329 of them — that is the honest cost of installing a
 kitchen-sink pack, and it is a large surface of third-party instructions.
 
-## What did NOT resolve
+## Second pass: the ones that did not resolve first time
 
-Searched and not found under these names. If you have the real repo for any, add it and
-I will install it:
+Searched individually rather than as a group, which found four more:
+
+| Name | Repo | Note |
+|---|---|---|
+| Clean Architecture Framework | `wondelai/skills` | 62 skills; scores a design 0-10 against seven diagnostic rows |
+| Elephant-Goldfish Model (egm) | `google/elephant-goldfish-model` | Apache 2.0; needs isolated subagents for its Goldfish reviews |
+| Software Architecture (davila7) | `davila7/claude-code-templates` | ~900 skills |
+| AccessLint | `accesslint/skills` | scan / inspect / audit / fix / diff |
+| Vertical slice | `CleanSlice/skills` | nearest equivalent to the Milan Jovanović packs |
+| Modular Design Principles | `vladikk/modularity` | Balanced Coupling model |
+| claude-mem | `thedotmack/claude-mem` | installs as skills; the runtime tool is separate |
+
+## Still not resolved
 
 - **claude-mem** — `thedotmack/claude-mem` exists but is a *runtime tool* (SQLite + vector
   search, hooks into the session lifecycle), not a `skills`-installable package.

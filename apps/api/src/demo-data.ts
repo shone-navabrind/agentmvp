@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createKernel, openMemoryDb, SuspendRun, type Kernel } from "@harness/kernel";
+import { createKernel, KernelError, openMemoryDb, SuspendRun, type Kernel } from "@harness/kernel";
 import { Board, boardProjection, defineBoardEvents } from "@harness/board";
 import { HostPool, LocalProcessDriver, Scheduler } from "@harness/compute";
 import { maxSessionsFor, SessionManager } from "@harness/sandbox";
@@ -179,7 +179,24 @@ export async function buildDemo() {
   const nightlyRun = await k.steps.start("nightly-tests", {}, SCOPE);
   await k.steps.execute(nightlyRun);
 
-  const failingRun = await k.steps.start("graph:release", {}, SCOPE);
+  // A genuinely failed run, so the Flows view shows a failure next to a gate rather
+  // than two identical paused runs.
+  k.steps.register({
+    kind: "sync-enterprise-addons",
+    maxAttempts: 1,
+    async run(ctx) {
+      await ctx.step("fetch", async () => ({ ref: "18.0" }));
+      return ctx.step("checkout", async () => {
+        throw new KernelError(
+          "GIT_FAILED",
+          "authentication failed for the enterprise repository",
+          { repo: "acme-enterprise" },
+          false,
+        );
+      });
+    },
+  });
+  const failingRun = await k.steps.start("sync-enterprise-addons", {}, SCOPE);
   await k.steps.execute(failingRun);
 
   await board.syncFromRuns(SCOPE);

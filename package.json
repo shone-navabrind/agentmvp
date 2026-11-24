@@ -12,7 +12,8 @@
     "start": "npm start -w @harness/api",
     "shots": "node apps/web/shots.mjs docs/screenshots",
     "a11y": "node apps/web/a11y.mjs",
-    "audit:ui": "npm run a11y"
+    "audit:ui": "npm run a11y && npm run a11y:manual",
+    "a11y:manual": "node apps/web/a11y-manual.mjs"
   },
   "devDependencies": {
     "axe-core": "^4.10.2"
